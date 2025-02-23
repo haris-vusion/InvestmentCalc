@@ -178,6 +178,8 @@ def main():
     st.title("Haris' Lods of Emone Simulator")
     st.write("Simulator to buy more cars and dumb shit")
     st.info("On mobile, tap the menu in the top-left corner to see the Simulation Parameters.")
+
+    # Sidebar parameters—change any of these and the simulation updates automatically!
     st.sidebar.header("Simulation Parameters")
     start_date = st.sidebar.date_input("Starting Date", value=datetime.today())
     initial_deposit = st.sidebar.number_input("Initial Deposit (£)", min_value=0, value=1000, step=500)
@@ -193,42 +195,39 @@ def main():
     annual_volatility = st.sidebar.slider("Annual Volatility (%)", 0.0, 50.0, 15.0, 0.5) / 100.0
     num_simulations = st.sidebar.number_input("Monte Carlo Simulations", min_value=100, value=1000, step=100)
 
-    if st.sidebar.button("Run Simulation"):
-        dates, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn = simulate_investment(
-            initial_deposit,
-            monthly_deposit,
-            annual_return_rate,
-            annual_inflation_rate,
-            annual_withdrawal_rate,
-            target_annual_living_cost,
-            years,
-            annual_volatility,
-            start_date
-        )
-        fig = create_plot(dates, portfolio_values, withdrawal_values, start_withdrawal_date)
-        st.plotly_chart(fig, use_container_width=True)
-        display_summary(start_withdrawal_date, total_withdrawn, portfolio_values, start_date)
+    # Run simulation automatically whenever any parameter is changed
+    dates, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn = simulate_investment(
+        initial_deposit,
+        monthly_deposit,
+        annual_return_rate,
+        annual_inflation_rate,
+        annual_withdrawal_rate,
+        target_annual_living_cost,
+        years,
+        annual_volatility,
+        start_date
+    )
+    fig = create_plot(dates, portfolio_values, withdrawal_values, start_withdrawal_date)
+    st.plotly_chart(fig, use_container_width=True)
+    display_summary(start_withdrawal_date, total_withdrawn, portfolio_values, start_date)
 
-        st.subheader("Monte Carlo Success Probability")
-        probability = run_monte_carlo(
-            initial_deposit,
-            monthly_deposit,
-            annual_return_rate,
-            annual_inflation_rate,
-            annual_withdrawal_rate,
-            target_annual_living_cost,
-            years,
-            annual_volatility,
-            start_date,
-            int(num_simulations)
-        )
-        st.write(
-            f"Based on {num_simulations} simulations, the probability of this actually working "
-            f"(starting withdrawals and ending with a positive balance) is **{probability:.2f}%**."
-        )
-    else:
-        st.info(
-            "Tweak the parameters in the sidebar and hit 'Run Simulation' to see how your investing unfolds, for better or worse.")
+    st.subheader("Monte Carlo Success Probability")
+    probability = run_monte_carlo(
+        initial_deposit,
+        monthly_deposit,
+        annual_return_rate,
+        annual_inflation_rate,
+        annual_withdrawal_rate,
+        target_annual_living_cost,
+        years,
+        annual_volatility,
+        start_date,
+        int(num_simulations)
+    )
+    st.write(
+        f"Based on {num_simulations} simulations, the probability of this actually working "
+        f"(starting withdrawals and ending with a positive balance) is **{probability:.2f}%**."
+    )
 
 
 if __name__ == "__main__":
