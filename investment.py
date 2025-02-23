@@ -189,7 +189,7 @@ def main():
                                                0.5) / 100.0
     target_annual_living_cost = st.sidebar.number_input("Target Annual Living Cost (£)", min_value=0, value=30000,
                                                         step=1000)
-    years = st.sidebar.slider("Number of Years to Simulate", 1, 60, 30, 1)
+    years = st.sidebar.slider("Number of Years to Simulate", 1, 40, 20, 1)
     annual_volatility = st.sidebar.slider("Annual Volatility (%)", 0.0, 50.0, 15.0, 0.5) / 100.0
     num_simulations = st.sidebar.number_input("Monte Carlo Simulations", min_value=100, value=1000, step=100)
 
