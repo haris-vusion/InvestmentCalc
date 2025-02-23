@@ -97,14 +97,23 @@ def create_plot(dates, portfolio_values, withdrawal_values, start_withdrawal_dat
         )
     )
     if start_withdrawal_date is not None:
+        # Add a simple vertical line without the built-in annotation_text.
         fig.add_vline(
             x=start_withdrawal_date,
             line_width=2,
-            line_color="green",
-            annotation_text="Withdrawals Begin",
-            annotation_position="top right",
-            annotation_font_color="green",
-            annotation_font_size=12
+            line_color="green"
+        )
+        # Add a separate annotation that doesn’t require averaging datetime objects.
+        fig.add_annotation(
+            x=start_withdrawal_date,
+            y=1,
+            xref="x",
+            yref="paper",
+            text="Withdrawals Begin",
+            showarrow=True,
+            arrowhead=1,
+            ax=0,
+            ay=-40
         )
     fig.update_layout(
         title="Portfolio Growth & Withdrawals Over Time (with Random Volatility)",
