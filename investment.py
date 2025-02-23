@@ -305,10 +305,10 @@ def main():
 
     st.sidebar.header("Simulation Parameters")
     start_date = st.sidebar.date_input("Starting Date", value=datetime.today())
-    initial_deposit = st.sidebar.number_input("Initial Deposit (£)", min_value=0, value=2000, step=500)
-    monthly_deposit = st.sidebar.number_input("Monthly Deposit (£)", min_value=0, value=300, step=50)
-    annual_return_rate = st.sidebar.slider("Annual Return Rate (%)", 0.0, 20.0, 10.0, 0.5) / 100.0
-    annual_inflation_rate = st.sidebar.slider("Annual Inflation Rate (%)", 0.0, 7.0, 3.0, 0.5) / 100.0
+    initial_deposit = st.sidebar.number_input("Initial Deposit (£)", min_value=0, value=1000, step=500)
+    monthly_deposit = st.sidebar.number_input("Monthly Deposit (£)", min_value=0, value=100, step=50)
+    annual_return_rate = st.sidebar.slider("Annual Return Rate (%)", 0.0, 20.0, 14.8, 0.2) / 100.0
+    annual_inflation_rate = st.sidebar.slider("Annual Inflation Rate (%)", 0.0, 7.0, 4.8, 0.2) / 100.0
     annual_withdrawal_rate = st.sidebar.slider("Annual Withdrawal Rate (%)", 0.0, 20.0, 4.0, 0.5) / 100.0
 
     st.sidebar.markdown("**Target Net Annual Living Cost**")
@@ -319,7 +319,7 @@ def main():
         step=1000
     )
 
-    years = st.sidebar.slider("Number of Years to Simulate", 1, 60, 30, 1)
+    years = st.sidebar.slider("Number of Years to Simulate", 1, 100, 20, 1)
     annual_volatility = st.sidebar.slider("Annual Volatility (%)", 0.0, 50.0, 15.0, 0.5) / 100.0
     num_simulations = st.sidebar.number_input("Monte Carlo Simulations", min_value=100, value=1000, step=100)
 
