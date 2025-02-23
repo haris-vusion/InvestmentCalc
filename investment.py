@@ -177,7 +177,7 @@ def run_monte_carlo(
 def main():
     st.title("Haris' Lods of Emone Simulator")
     st.write("Simulator to buy more cars and dumb shit")
-
+    st.info("On mobile, tap the menu in the top-left corner to see the Simulation Parameters.")
     st.sidebar.header("Simulation Parameters")
     start_date = st.sidebar.date_input("Starting Date", value=datetime.today())
     initial_deposit = st.sidebar.number_input("Initial Deposit (£)", min_value=0, value=1000, step=500)
