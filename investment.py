@@ -517,11 +517,24 @@ def main():
             x=avg_dates,
             y=avg_portfolio,
             mode='lines',
+            line=dict(color='blue', width=2, dash='dot'),
+            name='Potential Monthly Withdrawal (£)',
+            customdata=[[pmw] for pmw in avg_potential_withdrawals],
+            hovertemplate=(
+                "Potential Monthly Withdrawal: £%{customdata[0]:,.2f}<br>"
+                "<extra></extra>"
+            )
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=avg_dates,
+            y=avg_portfolio,
+            mode='lines',
             line=dict(color='green', width=2),
             name='Average Portfolio (£)',
             customdata=[[pmw] for pmw in avg_potential_withdrawals],
             hovertemplate=(
-                "Potential Monthly Withdrawal: £%{customdata[0]:,.2f}<br>"
                 "Avg Portfolio: £%{y:,.2f}"
                 "<extra></extra>"
             )
