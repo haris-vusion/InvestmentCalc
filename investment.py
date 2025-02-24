@@ -79,14 +79,12 @@ def simulate_investment_annual(
       2) Apply random annual return (draw from normal with mean=annual_return_rate, stdev=annual_volatility)
       3) Check if we can retire:
          - Condition: net(annual_withdrawal_rate * portfolio) >= current_annual_cost
-      4) If retired, we withdraw once per year:
-         - If mode == "strict": withdraw exactly the gross needed to net your cost (inflation adjusted).
-         - If mode == "four_percent": withdraw (annual_withdrawal_rate * portfolio) gross, pay tax, keep the net.
-           (If the portfolio isn't big enough, do partial.)
-      5) Inflates living cost each year.
-      6) Also inflates tax brackets each year (optional).
+      4) If retired, we withdraw once per year
+         - If mode == "strict": only enough gross to net your living cost
+         - If mode == "four_percent": withdraw (annual_withdrawal_rate * portfolio)
+      5) Inflates living cost each year
+      6) Also inflates tax brackets each year
     """
-    random_gen = random.Random()  # keep a local random generator if needed
     portfolio_value = float(initial_deposit)
     current_annual_deposit = float(annual_deposit)
     current_annual_cost = float(target_annual_living_cost)
@@ -112,8 +110,6 @@ def simulate_investment_annual(
             current_annual_deposit *= (1 + deposit_growth_rate)
 
         # 2) apply random annual return
-        #    We'll treat annual_return_rate as an average (like 0.07 => +7%)
-        #    with stdev = annual_volatility. Then do one random draw for the year.
         annual_return = random.gauss(annual_return_rate, annual_volatility)
         portfolio_value *= (1 + annual_return)
 
@@ -394,7 +390,7 @@ def main():
         "Withdrawal Mode",
         ("strict", "four_percent"),
         index=0,
-        help="strict = only withdraw exactly enough to net your living cost; four_percent = always withdraw 4% (or chosen rate) once retired"
+        help="strict = only withdraw exactly enough to net your living cost; four_percent = always withdraw 4% once retired"
     )
 
     # Convert percentages => decimals
@@ -451,7 +447,6 @@ def main():
     # Build a yearly plot
     fig = go.Figure()
     year_indices = range(user_years)
-    # We'll just map each year to its date
     x_vals = [avg_dates[i] for i in year_indices]
 
     # Plot portfolio
