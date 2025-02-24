@@ -346,7 +346,7 @@ def main():
     user_deposit_growth_rate = st.sidebar.slider(
         "Monthly Deposit Growth Rate (%)",
         0.0, 2.0,
-        default_params["deposit_growth_rate"],  # 0.1 => 0.1% monthly
+        default_params["deposit_growth_rate"],
         0.1,
         help="Rate at which your monthly deposit grows each month."
     )
@@ -528,15 +528,19 @@ def main():
         )
     )
 
-    # Add a vertical line if single-run withdrawals started
+    # Add a vertical line if single-run withdrawals started, and annotate it
     if single_start_wd is not None:
-        fig.add_vline(
-            x=single_start_wd,
-            line_width=2,
-            line_dash="dash",
-            line_color="black",
-            annotation_text="Withdrawal Start",
-            annotation_position="top right"
+        # Convert datetime to ISO format for the x-axis if needed
+        x_value = single_start_wd.isoformat() if isinstance(single_start_wd, datetime) else single_start_wd
+        fig.add_vline(x=x_value, line_width=2, line_dash="dash", line_color="black")
+        fig.add_annotation(
+            x=x_value,
+            y=max(single_portfolio),
+            text="Withdrawal Start",
+            showarrow=True,
+            arrowhead=2,
+            ax=0,
+            ay=-40
         )
 
     # Format the y-axis to 1 decimal place
