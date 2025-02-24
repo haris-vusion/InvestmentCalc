@@ -387,7 +387,7 @@ def main():
     )
     user_num_sims = st.sidebar.number_input(
         "Monte Carlo Simulations",
-        min_value=10,
+        min_value=1,
         value=default_params["num_simulations"],
         step=10
     )
