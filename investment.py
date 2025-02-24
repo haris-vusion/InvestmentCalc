@@ -115,7 +115,6 @@ def simulate_investment_annual(
 
         # 3) check if we can retire if not already
         pa, brt, hrt = get_tax_brackets_for_factor(tax_factor)
-        st.write(f'Tax brackets: {pa}, {brt}, {hrt}')
         net_if_4_percent = calc_net_annual(annual_withdrawal_rate * portfolio_value, pa, brt, hrt)
         st.write(f'net_if_4_percent: {net_if_4_percent}')
 
