@@ -505,24 +505,30 @@ def main():
     )
 
     ### ADDED: Potential monthly withdrawal for each average data point ###
-    avg_potential_withdrawals = [
-        p * user_annual_withdrawal_rate / 12.0
-        for p in avg_portfolio
-    ]
-
     # === CREATE COMBINED FIGURE ===
     fig = go.Figure()
+    avg_potential_withdrawals = [
+        p * (user_annual_withdrawal_rate / 12.0)
+        for p in avg_portfolio
+    ]
+    avg_customdata = []
+    inflation_factor = (1 + user_annual_inflation_rate) ** user_years
+    for pmw in avg_potential_withdrawals:
+        adj_pmw = pmw / inflation_factor
+        avg_customdata.append([pmw, adj_pmw])
+
+    # 3) Add the trace with the custom hovertemplate
     fig.add_trace(
         go.Scatter(
             x=avg_dates,
             y=avg_portfolio,
             mode='lines',
             line=dict(color='yellow', width=2, dash='dot'),
-            name='Potential Monthly Withdrawal (£)',
-            customdata=[[pmw] for pmw in avg_potential_withdrawals],
+            name='Average Portfolio (£)',
+            customdata=avg_customdata,
             hovertemplate=(
                 "Potential Monthly Withdrawal: £%{customdata[0]:,.2f} "
-                "(adj. £%{customdata[0]}/%{customdata[1]:,.2f})<br>"
+                "(adj. £%{customdata[1]:,.2f})<br>"
                 "<extra></extra>"
             )
         )
