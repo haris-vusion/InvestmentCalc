@@ -64,20 +64,26 @@ def simulate_investment(
     deposit_growth_rate,
     annual_return_rate,
     annual_inflation_rate,
-    annual_withdrawal_rate,
-    target_annual_living_cost,  # in "today's money"
+    annual_withdrawal_rate,    # Not really used now, since we rely on the net-living threshold
+    target_annual_living_cost, # In today's money
     years,
     annual_volatility,
     start_date
 ):
     """
-    A monthly simulation where:
-      - We deposit until the portfolio can sustain an inflation-adjusted cost.
-      - The 'target_annual_living_cost' is in today's money; each year we inflate it.
-      - Once withdrawals begin, no further deposits are made (like retirement).
+    Monthly simulation ensuring we only withdraw enough to net the inflation-adjusted cost.
+    If the portfolio can't sustain it, we withdraw 0.
+    Once withdrawals begin, we stop depositing.
+
+    target_annual_living_cost = e.g., 30000 in today's money
+    Each year t => inflated_annual_cost = 30000 * (1+inflation_rate)^t
+    Then we check if the portfolio >= the "gross needed / annual_withdrawal_rate"?
+    Actually, we don't even need annual_withdrawal_rate if we do direct net-living logic:
+
+    We do:
+      - If portfolio is big enough to fund that monthly net cost, we withdraw it (grossed up for tax).
+      - Otherwise, 0.
     """
-    import random
-    from dateutil.relativedelta import relativedelta
 
     total_months = years * 12
     monthly_mean_return = (1 + annual_return_rate) ** (1/12) - 1
@@ -90,57 +96,70 @@ def simulate_investment(
 
     dates_list = []
     portfolio_values = []
-    withdrawal_values = []
+    withdrawal_values = []  # This is the GROSS withdrawal each month
 
     current_monthly_deposit = monthly_deposit
 
-    for month in range(total_months):
-        current_date = start_date + relativedelta(months=+month)
+    for m in range(total_months):
+        current_date = start_date + relativedelta(months=m)
 
-        # ### NEW ###: figure out which "year" we're in to inflate cost
-        current_year = month // 12  # e.g. months 0..11 => year 0, 12..23 => year 1, etc.
+        # Determine which year we're in to inflate the cost
+        current_year = m // 12
+        # e.g., if m=0..11 => year 0, 12..23 => year 1, etc.
 
-        # The "real" annual cost in that year
-        # If we said 30k is "today's money," we inflate it by (1+inflation)^current_year
+        # The "net cost" in that year, inflation-adjusted
         inflated_annual_cost = target_annual_living_cost * (1 + annual_inflation_rate) ** current_year
+        monthly_net_cost = inflated_annual_cost / 12.0
 
-        # We want that cost post-tax, so let's see how big the portfolio must be:
-        # e.g., if annual_withdrawal_rate=4%, we check if portfolio >= (gross_needed / 0.04).
-        # But we also have to figure out how much GROSS is needed to net the inflated cost.
+        # Check if we can sustain it. That requires us to find how much GROSS is needed to net monthly_net_cost.
         pa, brt, hrt = get_tax_brackets_for_year(current_year, annual_inflation_rate)
-        gross_annual_needed = required_gross_annual_for_net_annual(inflated_annual_cost, pa, brt, hrt)
+        gross_needed_per_month = required_gross_annual_for_net_annual(inflated_annual_cost, pa, brt, hrt) / 12.0
 
-        required_portfolio = gross_annual_needed / annual_withdrawal_rate  # e.g., 4% rule => cost / 0.04
+        # If portfolio >= gross_needed_per_month * 12 for the year?
+        # Actually, let's do monthly check:
+        # If portfolio can handle gross_needed_per_month, we withdraw it, else 0.
+        # But we also want a single "once I'm big enough, I retire" approach:
+        # We'll do a simple approach: if portfolio >= gross_needed_per_month, we withdraw.
+        # Once we start withdrawing, we also stop deposits.
 
-        # ### NEW ###: If not withdrawing yet, see if we can start
-        if not withdrawing and portfolio_value >= required_portfolio:
-            withdrawing = True
-            start_withdrawal_date = current_date
+        if not withdrawing:
+            # See if we can start withdrawing
+            if portfolio_value >= gross_needed_per_month:
+                withdrawing = True
+                start_withdrawal_date = current_date
 
         # If not withdrawing, deposit
         if not withdrawing:
             portfolio_value += current_monthly_deposit
-            # Grow the deposit for next month
-            if month > 0:
+            # Grow deposit for next month
+            if m > 0:
                 current_monthly_deposit *= (1 + deposit_growth_rate)
 
-        # Apply random monthly return
-        monthly_return = random.gauss(monthly_mean_return, monthly_std)
-        portfolio_value *= (1 + monthly_return)
+        # Apply monthly return
+        current_month_return = random.gauss(monthly_mean_return, monthly_std)
+        portfolio_value *= (1 + current_month_return)
 
-        # If withdrawing, we withdraw enough GROSS to net that month's fraction
-        # of the inflated annual cost. That fraction is (inflated_annual_cost / 12).
+        # If withdrawing, see if we can pay the entire monthly_net_cost
         if withdrawing:
-            monthly_net_needed = inflated_annual_cost / 12.0
-            gross_needed = required_gross_annual_for_net_annual(monthly_net_needed * 12, pa, brt, hrt) / 12
-            withdrawal_amt = min(gross_needed, portfolio_value)
+            if portfolio_value >= gross_needed_per_month:
+                # We'll withdraw exactly what's needed to net monthly_net_cost
+                # monthly_net_cost is e.g. 2500 if 30k => 12
+                # Let's re-check the tax needed for just that monthly cost:
+                # We'll do the same approach:
+                #   gross for monthly_net_cost => required_gross_annual_for_net_annual(monthly_net_cost*12)/12
+                # But we already computed it: 'gross_needed_per_month'
+                withdrawal_amt = min(gross_needed_per_month, portfolio_value)
+            else:
+                # Can't sustain it => withdraw 0
+                withdrawal_amt = 0.0
+
             portfolio_value -= withdrawal_amt
         else:
             withdrawal_amt = 0.0
 
         total_withdrawn += withdrawal_amt
 
-        # Record data
+        # Record
         dates_list.append(current_date)
         portfolio_values.append(portfolio_value)
         withdrawal_values.append(withdrawal_amt)
