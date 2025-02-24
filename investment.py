@@ -368,6 +368,8 @@ def main():
         value=default_params["target_annual_living_cost"],
         step=1000
     )
+    st.write(f"DEBUG: target_annual_living_cost = {user_target_annual_living_cost}")
+
     user_years = st.sidebar.slider(
         "Number of Years to Simulate",
         1, 60,
@@ -443,7 +445,6 @@ def main():
         user_num_sims,
         user_mode
     )
-    st.write(f"DEBUG: target cost = {user_target_annual_living_cost}")
 
     # Build a yearly plot
     fig = go.Figure()
