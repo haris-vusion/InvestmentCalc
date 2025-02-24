@@ -517,7 +517,7 @@ def main():
             x=avg_dates,
             y=avg_portfolio,
             mode='lines',
-            line=dict(color='blue', width=2, dash='dot'),
+            line=dict(color='yellow', width=2, dash='dot'),
             name='Potential Monthly Withdrawal (£)',
             customdata=[[pmw] for pmw in avg_potential_withdrawals],
             hovertemplate=(
