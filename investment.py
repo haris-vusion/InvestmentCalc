@@ -186,20 +186,41 @@ def simulate_average_simulation(
 ############################
 # 3) PLOTTING & SUMMARIES
 ############################
-def display_summary(start_withdrawal_date, total_withdrawn, portfolio_values, start_date):
-    st.subheader("Summary")
-    if start_withdrawal_date is None:
-        st.write("• The portfolio never reached the threshold to sustain your target living cost (post-tax).")
-        st.write(f"• Final average portfolio value: £{portfolio_values[-1]:,.2f}")
+def display_summary_for_average(dates, portfolio, withdrawals, start_date):
+    """
+    Summarizes the average simulation's results, detecting the first time
+    (if any) that the average monthly withdrawal goes above zero.
+    """
+    import streamlit as st
+
+    # Find first month index where average withdrawal is non-zero
+    first_withdraw_idx = None
+    for i, w in enumerate(withdrawals):
+        if w > 1e-9:  # or just w > 0 if you prefer
+            first_withdraw_idx = i
+            break
+
+    total_withdrawn = sum(withdrawals)
+    final_portfolio = portfolio[-1]
+
+    st.subheader("Summary (Average Simulation)")
+
+    if first_withdraw_idx is None:
+        # Never withdrew in the average scenario
+        st.write("• The *average* portfolio never reached the threshold to sustain your target living cost.")
+        st.write(f"• Final average portfolio value: £{final_portfolio:,.2f}")
         st.write("• Total average withdrawn: £0.00 (No withdrawals were made.)")
     else:
-        years_to_withdraw = (start_withdrawal_date - start_date).days / 365.25
+        # Found a withdrawal start
+        start_withdraw_date = dates[first_withdraw_idx]
+        years_to_withdraw = (start_withdraw_date - start_date).days / 365.25
         st.write(
-            f"• Withdrawals began on **{start_withdrawal_date.strftime('%Y-%m-%d')}** "
+            f"• Withdrawals (on average) began on **{start_withdraw_date.strftime('%Y-%m-%d')}** "
             f"(~**{years_to_withdraw:.2f} years** into the simulation)."
         )
-        st.write(f"• Final average portfolio value: £{portfolio_values[-1]:,.2f}")
+        st.write(f"• Final average portfolio value: £{final_portfolio:,.2f}")
         st.write(f"• Total average withdrawn: £{total_withdrawn:,.2f}")
+
 
 ##############################
 # 4) MONTE CARLO & MEMES
@@ -558,7 +579,12 @@ def main():
     st.plotly_chart(fig, use_container_width=True)
 
     # === SINGLE RUN SUMMARY ===
-    display_summary(single_start_wd, single_total_wd, single_portfolio, user_start_date)
+    display_summary_for_average(
+        avg_dates,
+        avg_portfolio,
+        avg_withdrawals,
+        user_start_date
+    )
 
     # === INFLATION EQUIVALENCE NOTE ===
     # e.g., after 'user_years' years, how much is £100 today in future terms?
