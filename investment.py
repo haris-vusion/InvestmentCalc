@@ -521,7 +521,8 @@ def main():
             name='Potential Monthly Withdrawal (£)',
             customdata=[[pmw] for pmw in avg_potential_withdrawals],
             hovertemplate=(
-                "Potential Monthly Withdrawal: £%{customdata[0]:,.2f} (adj. £{customdata[0]/inflation_factor:,.2f})<br>"
+                "Potential Monthly Withdrawal: £%{customdata[0]:,.2f} "
+                "(adj. £%{customdata[0]}/%{customdata[1]:,.2f})<br>"
                 "<extra></extra>"
             )
         )
