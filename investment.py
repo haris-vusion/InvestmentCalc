@@ -102,7 +102,7 @@ def simulate_investment_annual(
 
     for yr in range(years):
         current_year_date = start_date + relativedelta(years=yr)
-
+        #what is the current year
         # 1) deposit if not retired
         if not withdrawing:
             portfolio_value += current_annual_deposit
@@ -115,7 +115,9 @@ def simulate_investment_annual(
 
         # 3) check if we can retire if not already
         pa, brt, hrt = get_tax_brackets_for_factor(tax_factor)
+        st.write(f'Tax brackets: {pa}, {brt}, {hrt}')
         net_if_4_percent = calc_net_annual(annual_withdrawal_rate * portfolio_value, pa, brt, hrt)
+        st.write(f'net_if_4_percent: {net_if_4_percent}')
 
         just_retired_this_year = False
         if (not withdrawing) and (net_if_4_percent >= current_annual_cost):
@@ -128,8 +130,11 @@ def simulate_investment_annual(
             if mode == "strict":
                 # Only withdraw exactly enough to net your cost
                 needed_gross = required_gross_annual_for_net_annual(current_annual_cost, pa, brt, hrt)
+                st.write(f"needed gross: {needed_gross}")
+
                 if portfolio_value >= needed_gross:
                     withdrawal_amt = needed_gross
+                    st.write(f"withdrawal_amt: {withdrawal_amt}")
                 else:
                     # partial if portfolio too small
                     withdrawal_amt = max(0, portfolio_value)
