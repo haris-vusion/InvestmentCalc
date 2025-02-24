@@ -86,22 +86,18 @@ def simulate_investment(
         else:
             this_month_net_cost = monthly_net_costs[-1] * (1 + monthly_inflation_rate)
 
-        # Check if we can start withdrawing
         required_portfolio = (this_month_net_cost * 12) / annual_withdrawal_rate
         if not withdrawing and portfolio_value >= required_portfolio:
             withdrawing = True
             start_withdrawal_date = current_date
 
-        # Grow monthly deposit
         if month > 0:
             current_monthly_deposit *= (1 + deposit_growth_rate)
         portfolio_value += current_monthly_deposit
 
-        # Market returns
         current_month_return = random.gauss(monthly_mean_return, monthly_std)
         portfolio_value *= (1 + current_month_return)
 
-        # Withdraw if in withdrawal mode
         if withdrawing:
             current_year = month // 12
             pa, brt, hrt = get_tax_brackets_for_year(current_year, annual_inflation_rate)
@@ -245,7 +241,7 @@ def display_memes(probability):
     good_memes_folder = "goodMemes"
     bad_memes_folder = "badMemes"
 
-    if probability >= 80:
+    if probability >= 50:
         meme_folder = good_memes_folder
         st.markdown("### Congratulations! It's a Good Outcome Meme Break")
     else:
@@ -275,7 +271,6 @@ def main():
             text-align: center;
             font-size: 48px;
             font-weight: 600;
-            color: #2ecc71;
             margin-top: 10px;
             margin-bottom: 10px;
         }
@@ -287,6 +282,9 @@ def main():
         }
         </style>
     """, unsafe_allow_html=True)
+
+    # Show an initial prompt at the top
+    st.info("Welcome! Adjust the parameters in the sidebar to see how your financial future unfolds.")
 
     st.title("Haris' Lods of Emone Simulator")
     st.write(
@@ -360,7 +358,7 @@ def main():
         help="Number of runs for both the average curve and success probability."
     )
 
-    # 1) Compute success probability up front and display as big metric
+    # 1) Compute success probability & color code it
     probability = run_monte_carlo(
         initial_deposit,
         monthly_deposit,
@@ -374,7 +372,20 @@ def main():
         start_date,
         int(num_simulations)
     )
-    st.markdown(f"<div class='subtle-box'><div class='big-metric'>Monte Carlo Success Probability: {probability:.2f}%</div></div>", unsafe_allow_html=True)
+
+    # Decide color: green if >=50%, else red
+    if probability >= 50:
+        color = "#2ecc71"  # green
+    else:
+        color = "#e74c3c"  # red
+
+    # Show the success probability in a big metric
+    st.markdown(
+        f"<div class='subtle-box'><div class='big-metric' style='color:{color}'>"
+        f"Monte Carlo Success Probability: {probability:.2f}%"
+        f"</div></div>",
+        unsafe_allow_html=True
+    )
 
     # 2) Plot average results
     dates, avg_portfolio, avg_withdrawal = simulate_average_simulation(
@@ -411,7 +422,7 @@ def main():
     # 4) Meme time
     display_memes(probability)
 
-
 if __name__ == "__main__":
     main()
+
 
