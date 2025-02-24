@@ -532,7 +532,7 @@ def main():
     if single_start_wd is not None:
         # Convert datetime to ISO format for the x-axis if needed
         x_value = single_start_wd.isoformat() if isinstance(single_start_wd, datetime) else single_start_wd
-        fig.add_vline(x=x_value, line_width=2, line_dash="dash", line_color="black")
+        fig.add_vline(x=x_value, line_width=2, line_dash="dash", line_color="green")
         fig.add_annotation(
             x=x_value,
             y=max(single_portfolio),
@@ -545,7 +545,7 @@ def main():
             arrowcolor="green"
         )
     # Format the y-axis to 1 decimal place
-    fig.update_yaxes(tickformat=".1f")
+    fig.update_yaxes(tickformat=",.1f")
 
     fig.update_layout(
         title="Portfolio Growth & Withdrawals Over Time",
