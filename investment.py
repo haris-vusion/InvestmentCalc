@@ -13,7 +13,7 @@ from dateutil.relativedelta import relativedelta
 # Base thresholds (2023-24, approximate)
 BASE_PERSONAL_ALLOWANCE = 12570
 BASE_BASIC_RATE_LIMIT = 50270  # up to this (minus PA) taxed at 20%
-BASE_HIGHER_RATE_LIMIT = 125140  # up to this taxed at 40%, above taxed at 45%
+BASE_HIGHER_RATE_LIMIT = 125140  # above this taxed at 45%, between basic & higher taxed at 40%
 
 
 def calc_tax_annual(gross, pa, brt, hrt):
@@ -75,7 +75,7 @@ def get_tax_brackets_for_year(year, annual_inflation_rate):
 def simulate_investment(
         initial_deposit,
         monthly_deposit,
-        deposit_growth_rate,  # New: monthly deposit increases at this rate each month
+        deposit_growth_rate,  # monthly deposit increases at this rate each month
         annual_return_rate,
         annual_inflation_rate,
         annual_withdrawal_rate,
@@ -90,7 +90,7 @@ def simulate_investment(
     - Living cost (net) is inflated monthly.
     - We convert the net cost to a required gross withdrawal using the current year's tax brackets.
     - Withdrawals begin once the portfolio can sustain that gross withdrawal.
-    - Monthly deposits grow each month at a rate that is capped to be no higher than inflation.
+    - Monthly deposits grow each month by deposit_growth_rate.
     """
     total_months = years * 12
 
@@ -112,7 +112,7 @@ def simulate_investment(
     withdrawal_values = []
     monthly_net_costs = []
 
-    # Set up the current monthly deposit amount that will grow over time.
+    # Set up the current monthly deposit amount that grows over time.
     current_monthly_deposit = monthly_deposit
 
     for month in range(total_months):
@@ -130,7 +130,7 @@ def simulate_investment(
             withdrawing = True
             start_withdrawal_date = current_date
 
-        # Increase the monthly deposit by deposit_growth_rate (capped to inflation)
+        # Increase the monthly deposit by deposit_growth_rate.
         if month > 0:
             current_monthly_deposit *= (1 + deposit_growth_rate)
         # Add the current monthly deposit to the portfolio.
@@ -140,7 +140,7 @@ def simulate_investment(
         current_month_return = random.gauss(monthly_mean_return, monthly_std)
         portfolio_value *= (1 + current_month_return)
 
-        # If in withdrawal mode, calculate required gross withdrawal:
+        # If in withdrawal mode, calculate required gross withdrawal.
         if withdrawing:
             current_year = month // 12  # 0-based year
             pa, brt, hrt = get_tax_brackets_for_year(current_year, annual_inflation_rate)
@@ -162,6 +162,49 @@ def simulate_investment(
     return dates_list, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn
 
 
+def simulate_average_simulation(
+        initial_deposit,
+        monthly_deposit,
+        deposit_growth_rate,
+        annual_return_rate,
+        annual_inflation_rate,
+        annual_withdrawal_rate,
+        target_annual_living_cost,
+        years,
+        annual_volatility,
+        start_date,
+        num_simulations
+):
+    """
+    Run the simulation num_simulations times and compute the average portfolio
+    and withdrawal values at each time step.
+    """
+    total_months = years * 12
+    aggregated_portfolio = [0.0] * total_months
+    aggregated_withdrawal = [0.0] * total_months
+
+    for _ in range(num_simulations):
+        dates, pv, wv, _, _ = simulate_investment(
+            initial_deposit,
+            monthly_deposit,
+            deposit_growth_rate,
+            annual_return_rate,
+            annual_inflation_rate,
+            annual_withdrawal_rate,
+            target_annual_living_cost,
+            years,
+            annual_volatility,
+            start_date
+        )
+        for i in range(total_months):
+            aggregated_portfolio[i] += pv[i]
+            aggregated_withdrawal[i] += wv[i]
+
+    avg_portfolio = [x / num_simulations for x in aggregated_portfolio]
+    avg_withdrawal = [x / num_simulations for x in aggregated_withdrawal]
+    return dates, avg_portfolio, avg_withdrawal
+
+
 # -------------------------------
 # 3) Plotting & Summary Functions
 # -------------------------------
@@ -174,7 +217,7 @@ def create_plot(dates, portfolio_values, withdrawal_values, start_withdrawal_dat
             y=portfolio_values,
             mode='lines',
             line=dict(color='blue', width=2),
-            name='Portfolio Value (£)'
+            name='Average Portfolio Value (£)'
         )
     )
     fig.add_trace(
@@ -183,7 +226,7 @@ def create_plot(dates, portfolio_values, withdrawal_values, start_withdrawal_dat
             y=withdrawal_values,
             mode='lines',
             line=dict(color='red', width=2, dash='dot'),
-            name='Monthly Withdrawal (£)'
+            name='Average Monthly Withdrawal (£)'
         )
     )
     if start_withdrawal_date is not None:
@@ -200,7 +243,7 @@ def create_plot(dates, portfolio_values, withdrawal_values, start_withdrawal_dat
             ay=-40
         )
     fig.update_layout(
-        title="Portfolio Growth & Withdrawals Over Time (UK Tax with 5-Year Inflation Adjustment)",
+        title="Average Portfolio Growth & Withdrawals Over Time",
         xaxis_title="Date",
         yaxis_title="£",
         hovermode="x unified",
@@ -213,16 +256,16 @@ def display_summary(start_withdrawal_date, total_withdrawn, portfolio_values, st
     st.subheader("Summary")
     if start_withdrawal_date is None:
         st.write("• The portfolio never reached the threshold to sustain your target living cost (post-tax).")
-        st.write(f"• Final portfolio value: £{portfolio_values[-1]:,.2f}")
-        st.write("• Total withdrawn: £0.00 (No withdrawals were made.)")
+        st.write(f"• Final average portfolio value: £{portfolio_values[-1]:,.2f}")
+        st.write("• Total average withdrawn: £0.00 (No withdrawals were made.)")
     else:
         years_to_withdraw = (start_withdrawal_date - start_date).days / 365.25
         st.write(
-            f"• Started withdrawing on **{start_withdrawal_date.strftime('%Y-%m-%d')}** "
+            f"• Average withdrawals began on **{start_withdrawal_date.strftime('%Y-%m-%d')}** "
             f"(after about **{years_to_withdraw:.2f} years**)."
         )
-        st.write(f"• Final portfolio value: £{portfolio_values[-1]:,.2f}")
-        st.write(f"• Total withdrawn: £{total_withdrawn:,.2f}")
+        st.write(f"• Final average portfolio value: £{portfolio_values[-1]:,.2f}")
+        st.write(f"• Total average withdrawn: £{total_withdrawn:,.2f}")
 
 
 # -------------------------------
@@ -244,7 +287,7 @@ def run_monte_carlo(
 ):
     success_count = 0
     for _ in range(num_simulations):
-        _, portfolio_values, _, start_withdrawal_date, _ = simulate_investment(
+        _, pv, _, start_withdrawal_date, _ = simulate_investment(
             initial_deposit,
             monthly_deposit,
             deposit_growth_rate,
@@ -256,7 +299,7 @@ def run_monte_carlo(
             annual_volatility,
             start_date
         )
-        if start_withdrawal_date is not None and portfolio_values[-1] > 0:
+        if start_withdrawal_date is not None and pv[-1] > 0:
             success_count += 1
     return (success_count / num_simulations) * 100
 
@@ -264,7 +307,7 @@ def run_monte_carlo(
 def display_memes(probability):
     """
     Display exactly ONE meme, centered, based on whether the outcome is 'good' or 'bad'.
-    We'll say 'good' if probability >= 50, else 'bad'.
+    We'll say 'good' if probability >= 80, else 'bad'.
     """
     good_memes_folder = "goodMemes"
     bad_memes_folder = "badMemes"
@@ -296,10 +339,10 @@ def display_memes(probability):
 # -------------------------------
 
 def main():
-    st.title("Haris' Lods of Emone Simulator (with UK Taxes & Growing Deposits)")
+    st.title("Haris' Lods of Emone Simulator (with UK Taxes, Growing Deposits & Average Simulation)")
     st.write(
-        "This simulator treats your target living cost as **post-tax** using a simplified UK tax model with "
-        "brackets adjusted for inflation every 5 years. Monthly deposits also increase over time (capped at the inflation rate)."
+        "This simulator treats your target living cost as **post-tax** using a simplified UK tax model "
+        "with brackets adjusted for inflation every 5 years. Monthly deposits also increase over time (capped by inflation)."
     )
     st.info("On mobile, tap the menu in the top-left corner to see the Simulation Parameters.")
 
@@ -308,8 +351,6 @@ def main():
     start_date = st.sidebar.date_input("Starting Date", value=datetime.today())
     initial_deposit = st.sidebar.number_input("Initial Deposit (£)", min_value=0, value=1000, step=500)
     monthly_deposit = st.sidebar.number_input("Monthly Deposit (£)", min_value=0, value=100, step=50)
-    # New: Monthly deposit growth rate slider.
-    # It cannot exceed the inflation rate.
     annual_inflation_rate = st.sidebar.slider("Annual Inflation Rate (%)", 0.0, 7.0, 4.8, 0.2) / 100.0
     deposit_growth_rate = st.sidebar.slider(
         "Monthly Deposit Growth Rate (%)",
@@ -327,10 +368,28 @@ def main():
     )
     years = st.sidebar.slider("Number of Years to Simulate", 1, 100, 20, 1)
     annual_volatility = st.sidebar.slider("Annual Volatility (%)", 0.0, 30.0, 15.0, 0.2) / 100.0
-    num_simulations = st.sidebar.number_input("Monte Carlo Simulations", min_value=10, value=10, step=10)
+    num_simulations = st.sidebar.number_input("Monte Carlo Simulations (for average graph)", min_value=10, value=50,
+                                              step=10)
 
-    # Run single simulation
-    dates, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn = simulate_investment(
+    # Run average simulation (graph) over num_simulations runs.
+    dates, avg_portfolio, avg_withdrawal = simulate_average_simulation(
+        initial_deposit,
+        monthly_deposit,
+        deposit_growth_rate,
+        annual_return_rate,
+        annual_inflation_rate,
+        annual_withdrawal_rate,
+        target_annual_living_cost,
+        years,
+        annual_volatility,
+        start_date,
+        int(num_simulations)
+    )
+    fig = create_plot(dates, avg_portfolio, avg_withdrawal, None)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # For summary, run one simulation (to get a representative start withdrawal date etc.)
+    sim_dates, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn = simulate_investment(
         initial_deposit,
         monthly_deposit,
         deposit_growth_rate,
@@ -342,11 +401,9 @@ def main():
         annual_volatility,
         start_date
     )
-    fig = create_plot(dates, portfolio_values, withdrawal_values, start_withdrawal_date)
-    st.plotly_chart(fig, use_container_width=True)
     display_summary(start_withdrawal_date, total_withdrawn, portfolio_values, start_date)
 
-    # Monte Carlo simulation
+    # Monte Carlo simulation for success probability
     st.subheader("Monte Carlo Success Probability")
     probability = run_monte_carlo(
         initial_deposit,
@@ -362,7 +419,7 @@ def main():
         int(num_simulations)
     )
     st.write(
-        f"Based on {num_simulations} simulations, the probability of achieving your post-tax living cost "
+        f"Based on {num_simulations} simulation runs, the probability of achieving your post-tax living cost "
         f"and ending with a positive portfolio is **{probability:.2f}%**."
     )
 
