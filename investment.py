@@ -269,7 +269,7 @@ def display_memes(probability):
     good_memes_folder = "goodMemes"
     bad_memes_folder = "badMemes"
 
-    if probability >= 50:
+    if probability >= 80:
         meme_folder = good_memes_folder
         st.markdown("### Congratulations! It's a Good Outcome Meme Break")
     else:
