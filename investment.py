@@ -73,10 +73,15 @@ def simulate_investment(
     """
     Runs a single simulation path with monthly compounding, monthly deposit growth,
     and an automatic 'switch to withdrawals' once the portfolio can sustain the net annual cost.
+    Once withdrawals begin, no further deposits are made.
     """
+
     total_months = years * 12
     monthly_mean_return = (1 + annual_return_rate) ** (1/12) - 1
     monthly_std = annual_volatility / (12 ** 0.5)
+
+    # We'll do monthly inflation on the living cost.
+    # "this_month_net_cost" grows by monthly_inflation_rate each iteration.
     monthly_inflation_rate = (1 + annual_inflation_rate) ** (1/12) - 1
     initial_monthly_net_cost = target_annual_living_cost / 12.0
 
@@ -95,31 +100,38 @@ def simulate_investment(
     for month in range(total_months):
         current_date = start_date + relativedelta(months=+month)
 
-        # Adjust net monthly cost by inflation
+        # If it's the first month, net cost is initial; else inflate from last month
         if month == 0:
             this_month_net_cost = initial_monthly_net_cost
         else:
             this_month_net_cost = monthly_net_costs[-1] * (1 + monthly_inflation_rate)
 
-        # Check if we should start withdrawing
-        required_portfolio = (this_month_net_cost * 12) / annual_withdrawal_rate
-        if not withdrawing and portfolio_value >= required_portfolio:
-            withdrawing = True
-            start_withdrawal_date = current_date
+        # ### NEW ###: If not withdrawing, add deposit. Once we start withdrawing, deposit=0.
+        if not withdrawing:
+            portfolio_value += current_monthly_deposit
 
-        # Grow the monthly deposit
-        if month > 0:
-            current_monthly_deposit *= (1 + deposit_growth_rate)
-        portfolio_value += current_monthly_deposit
+            # Grow the deposit for next month
+            if month > 0:
+                current_monthly_deposit *= (1 + deposit_growth_rate)
 
         # Random monthly return
         current_month_return = random.gauss(monthly_mean_return, monthly_std)
         portfolio_value *= (1 + current_month_return)
 
-        # If withdrawing, figure out the gross needed to net this_month_net_cost
+        # Check if we should start withdrawing
+        if not withdrawing:
+            # Required portfolio to sustain the monthly net cost
+            required_portfolio = (this_month_net_cost * 12) / annual_withdrawal_rate
+            if portfolio_value >= required_portfolio:
+                withdrawing = True
+                start_withdrawal_date = current_date
+
+        # If withdrawing, figure out how much to withdraw
         if withdrawing:
             current_year = month // 12
             pa, brt, hrt = get_tax_brackets_for_year(current_year, annual_inflation_rate)
+
+            # We want this_month_net_cost * 12 net
             net_annual_needed = this_month_net_cost * 12
             gross_annual_needed = required_gross_annual_for_net_annual(net_annual_needed, pa, brt, hrt)
             monthly_gross_needed = gross_annual_needed / 12.0
@@ -131,7 +143,7 @@ def simulate_investment(
 
         total_withdrawn += withdrawal_amt
 
-        # Record the data
+        # Record data
         dates_list.append(current_date)
         portfolio_values.append(portfolio_value)
         withdrawal_values.append(withdrawal_amt)
@@ -504,20 +516,27 @@ def main():
         int(user_num_simulations)
     )
 
-    ### ADDED: Potential monthly withdrawal for each average data point ###
-    # === CREATE COMBINED FIGURE ===
+    # --- CREATE FIGURE ---
     fig = go.Figure()
+
+    # (A) We'll do a "4% rule" style potential monthly withdrawal for the *average* portfolio
+    # but with TIME-BASED inflation so we only apply (1+inflation)^years_elapsed
     avg_potential_withdrawals = [
         p * (user_annual_withdrawal_rate / 12.0)
         for p in avg_portfolio
     ]
+
+    # Build customdata: [ [nominal, adjusted], [nominal, adjusted], ... ]
+    # where "adjusted" uses partial inflation factor per month
     avg_customdata = []
-    inflation_factor = (1 + user_annual_inflation_rate) ** user_years
-    for pmw in avg_potential_withdrawals:
-        adj_pmw = pmw / inflation_factor
+    for m, pmw in enumerate(avg_potential_withdrawals):
+        months_elapsed = m  # 0..(user_years*12 - 1)
+        year_fraction = months_elapsed / 12.0
+        factor_m = (1 + user_annual_inflation_rate) ** year_fraction
+        adj_pmw = pmw / factor_m
         avg_customdata.append([pmw, adj_pmw])
 
-    # 3) Add the trace with the custom hovertemplate
+    # (B) Add the trace that shows potential monthly withdrawal in the hover
     fig.add_trace(
         go.Scatter(
             x=avg_dates,
@@ -527,27 +546,16 @@ def main():
             name='Average Portfolio (£)',
             customdata=avg_customdata,
             hovertemplate=(
+                "Date: %{x|%Y-%m-%d}<br>"
+                "Avg Portfolio: £%{y:,.2f}<br>"
                 "Potential Monthly Withdrawal: £%{customdata[0]:,.2f} "
                 "(adj. £%{customdata[1]:,.2f})<br>"
                 "<extra></extra>"
             )
         )
     )
-    fig.add_trace(
-        go.Scatter(
-            x=avg_dates,
-            y=avg_portfolio,
-            mode='lines',
-            line=dict(color='green', width=2),
-            name='Average Portfolio (£)',
-            customdata=[[pmw] for pmw in avg_potential_withdrawals],
-            hovertemplate=(
-                "Avg Portfolio: £%{y:,.2f}"
-                "<extra></extra>"
-            )
-        )
-    )
-    # Single-run portfolio
+
+    # (C) Single-run portfolio
     fig.add_trace(
         go.Scatter(
             x=single_dates,
@@ -557,7 +565,8 @@ def main():
             name='Single-Run Portfolio (£)'
         )
     )
-    # Single-run withdrawals
+
+    # (D) Single-run withdrawals
     fig.add_trace(
         go.Scatter(
             x=single_dates,
@@ -568,10 +577,7 @@ def main():
         )
     )
 
-    # Average portfolio
-    ### ADDED: pass `customdata` and `hovertemplate` to show potential monthly withdrawal
-
-    # Average withdrawals
+    # (E) Average withdrawals
     fig.add_trace(
         go.Scatter(
             x=avg_dates,
@@ -582,9 +588,8 @@ def main():
         )
     )
 
-    # Add a vertical line if single-run withdrawals started, and annotate it
+    # If single-run withdrawals started, add a vertical line
     if single_start_wd is not None:
-        # Convert datetime to ISO format for the x-axis if needed
         x_value = single_start_wd.isoformat() if isinstance(single_start_wd, datetime) else single_start_wd
         fig.add_vline(x=x_value, line_width=2, line_dash="dash", line_color="green")
         fig.add_annotation(
@@ -599,9 +604,8 @@ def main():
             arrowcolor="green"
         )
 
-    # Format the y-axis to 2 decimal places w/ thousands separator
+    # Y-axis formatting
     fig.update_yaxes(tickformat=",.2f")
-
     fig.update_layout(
         title="Portfolio Growth & Withdrawals Over Time",
         xaxis_title="Date",
@@ -610,6 +614,7 @@ def main():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=40, r=40, t=60, b=40)
     )
+
     st.plotly_chart(fig, use_container_width=True)
 
     # === SUMMARY (for average scenario, as example) ===
@@ -621,6 +626,7 @@ def main():
     )
 
     # === INFLATION EQUIVALENCE NOTE ===
+    # This uses the full user_years factor for reference.
     inflation_factor = (1 + user_annual_inflation_rate) ** user_years
     st.write(
         f"**Inflation Check:** With {user_annual_inflation_rate*100:.2f}% annual inflation over {user_years} years, "
