@@ -519,55 +519,79 @@ def main():
     # --- CREATE FIGURE ---
     fig = go.Figure()
 
-    # (A) We'll do a "4% rule" style potential monthly withdrawal for the *average* portfolio
-    # but with TIME-BASED inflation so we only apply (1+inflation)^years_elapsed
-    avg_potential_withdrawals = [
-        p * (user_annual_withdrawal_rate / 12.0)
-        for p in avg_portfolio
-    ]
+    # (A) Compute Yearly Values from the Average Simulation
+    # We sample at the end of each year (e.g., index 11 for year 1, 23 for year 2, etc.)
+    total_months = len(avg_dates)  # should be user_years * 12
+    year_dates = []
+    year_portfolio = []
+    year_customdata = []  # each entry: [nominal_yearly_withdrawal, adjusted_yearly_withdrawal]
+    for i in range(user_years):
+        idx = (i + 1) * 12 - 1  # end-of-year index
+        if idx >= total_months:
+            break
+        year_dates.append(avg_dates[idx])
+        p = avg_portfolio[idx]
+        year_portfolio.append(p)
+        nominal = p * user_annual_withdrawal_rate
+        # Compute inflation factor for (i+1) years elapsed
+        factor = (1 + user_annual_inflation_rate) ** (i + 1)
+        adjusted = nominal / factor
+        year_customdata.append([nominal, adjusted])
 
-    # Build customdata: [ [nominal, adjusted], [nominal, adjusted], ... ]
-    # where "adjusted" uses partial inflation factor per month
-    avg_customdata = []
-    for m, pmw in enumerate(avg_potential_withdrawals):
-        months_elapsed = m  # 0..(user_years*12 - 1)
-        year_fraction = months_elapsed / 12.0
-        factor_m = (1 + user_annual_inflation_rate) ** year_fraction
-        adj_pmw = pmw / factor_m
-        avg_customdata.append([pmw, adj_pmw])
-
-    # (B) Add the trace that shows potential monthly withdrawal in the hover
+    # (B) Add the trace that shows the yearly potential withdrawal info on the average portfolio line
     fig.add_trace(
         go.Scatter(
-            x=avg_dates,
-            y=avg_portfolio,
-            mode='lines',
+            x=year_dates,
+            y=year_portfolio,
+            mode='markers+lines',
             line=dict(color='#17becf', width=3),
-            name='Average Portfolio (£)',
-            customdata=avg_customdata,
+            marker=dict(size=8),
+            name='Yearly Portfolio (Potential Withdrawal)',
+            customdata=year_customdata,
             hovertemplate=(
-                "Date: %{x|%Y-%m-%d}<br>"
-                "Avg Portfolio: £%{y:,.2f}<br>"
-                "Potential Monthly Withdrawal: £%{customdata[0]:,.2f} "
+                "Year: %{x|%Y-%m-%d}<br>"
+                "Year-End Portfolio: £%{y:,.2f}<br>"
+                "Potential Yearly Withdrawal: £%{customdata[0]:,.2f} "
                 "(adj. £%{customdata[1]:,.2f})<br>"
                 "<extra></extra>"
             )
         )
     )
 
+    # (C) Single-run portfolio trace
+    fig.add_trace(
+        go.Scatter(
+            x=single_dates,
+            y=single_portfolio,
+            mode='lines',
+            line=dict(color='blue', width=2),
+            name='Single-Run Portfolio (£)'
+        )
+    )
 
-    # (E) Average withdrawals
+    # (D) Single-run withdrawals trace
+    fig.add_trace(
+        go.Scatter(
+            x=single_dates,
+            y=single_withdrawals,
+            mode='lines',
+            line=dict(color='red', width=2, dash='dot'),
+            name='Single-Run Yearly Withdrawal (£)'
+        )
+    )
+
+    # (E) Average withdrawals trace (if still desired)
     fig.add_trace(
         go.Scatter(
             x=avg_dates,
             y=avg_withdrawals,
             mode='lines',
-            line=dict(color='yellow', width=2,dash='dot'),
-            name='Average Monthly Withdrawal (£)'
+            line=dict(color='yellow', width=2, dash='dot'),
+            name='Average Withdrawal (£)'
         )
     )
 
-    # If single-run withdrawals started, add a vertical line
+    # If single-run withdrawals started, add a vertical line with annotation
     if single_start_wd is not None:
         x_value = single_start_wd.isoformat() if isinstance(single_start_wd, datetime) else single_start_wd
         fig.add_vline(x=x_value, line_width=2, line_dash="dash", line_color="green")
@@ -594,30 +618,22 @@ def main():
         margin=dict(l=40, r=40, t=60, b=40)
     )
     # --- Add milestone markers on the average portfolio line ---
-    # Define milestones and an empty container for marker data
     milestones = [10000, 100000, 250000, 500000, 1000000, 10000000, 50000000, 100000000, 250000000, 500000000]
     milestone_x = []
     milestone_y = []
     milestone_text = []
-
-    # Loop through each milestone and find when it's first reached
     for milestone in milestones:
-        # Find first index where avg_portfolio >= milestone
         idx = next((i for i, p in enumerate(avg_portfolio) if p >= milestone), None)
         if idx is not None:
             milestone_x.append(avg_dates[idx])
             milestone_y.append(avg_portfolio[idx])
-            # For the final milestone, add a fun note
             if milestone == milestones[-1]:
                 milestone_text.append(f"£{milestone/1e6:.0f}m – Billionaire!")
             else:
-                # Format the milestone nicely (e.g., £10k, £100k, £1m)
                 if milestone < 1000000:
                     milestone_text.append(f"£{milestone/1000:.0f}k")
                 else:
                     milestone_text.append(f"£{milestone/1e6:.0f}m")
-
-    # Add these markers as a separate scatter trace (using markers+text)
     fig.add_trace(
         go.Scatter(
             x=milestone_x,
@@ -642,7 +658,6 @@ def main():
     )
 
     # === INFLATION EQUIVALENCE NOTE ===
-    # This uses the full user_years factor for reference.
     inflation_factor = (1 + user_annual_inflation_rate) ** user_years
     st.write(
         f"**Inflation Check:** With {user_annual_inflation_rate*100:.2f}% annual inflation over {user_years} years, "
