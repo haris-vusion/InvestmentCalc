@@ -320,14 +320,14 @@ def main():
         "start_date": datetime.today().date(),
         "initial_deposit": 10000,
         "annual_deposit": 6000,  # e.g. 500 per month x 12
-        "annual_inflation_rate": 3.0,   # 3% annual
+        "annual_inflation_rate": 4.8,   # 3% annual
         "deposit_growth_rate": 2.0,     # 2% annual deposit growth
-        "annual_return_rate": 7.0,      # 7% annual
+        "annual_return_rate": 14.8,      # 7% annual
         "annual_withdrawal_rate": 4.0,  # 4% rule
         "target_annual_living_cost": 30000,
-        "years": 40,
-        "annual_volatility": 10.0,      # 10% stdev
-        "num_simulations": 50
+        "years": 20,
+        "annual_volatility": 15.0,      # 10% stdev
+        "num_simulations": 10
     }
 
     # === SIDEBAR ===
