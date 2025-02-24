@@ -512,7 +512,21 @@ def main():
 
     # === CREATE COMBINED FIGURE ===
     fig = go.Figure()
-
+    fig.add_trace(
+        go.Scatter(
+            x=avg_dates,
+            y=avg_portfolio,
+            mode='lines',
+            line=dict(color='green', width=2),
+            name='Average Portfolio (£)',
+            customdata=[[pmw] for pmw in avg_potential_withdrawals],
+            hovertemplate=(
+                "Avg Portfolio: £%{y:,.2f}<br>"
+                "Potential Monthly Withdrawal: £%{customdata[0]:,.2f}"
+                "<extra></extra>"
+            )
+        )
+    )
     # Single-run portfolio
     fig.add_trace(
         go.Scatter(
@@ -536,22 +550,6 @@ def main():
 
     # Average portfolio
     ### ADDED: pass `customdata` and `hovertemplate` to show potential monthly withdrawal
-    fig.add_trace(
-        go.Scatter(
-            x=avg_dates,
-            y=avg_portfolio,
-            mode='lines',
-            line=dict(color='green', width=2),
-            name='Average Portfolio (£)',
-            customdata=[ [pmw] for pmw in avg_potential_withdrawals ],
-            hovertemplate=(
-                "Date: %{x|%Y-%m-%d}<br>"
-                "Avg Portfolio: £%{y:,.2f}<br>"
-                "Potential Monthly Withdrawal: £%{customdata[0]:,.2f}"
-                "<extra></extra>"
-            )
-        )
-    )
 
     # Average withdrawals
     fig.add_trace(
