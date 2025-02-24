@@ -58,6 +58,20 @@ def get_tax_brackets_for_factor(factor):
     return pa, brt, hrt
 
 
+################################
+# 1A) HELPER TO CHECK RETIREMENT
+################################
+def can_retire_now(portfolio_value, annual_withdrawal_rate, current_annual_cost, pa, brt, hrt):
+    """
+    Return True if the net withdrawal (after tax) from portfolio_value * annual_withdrawal_rate
+    is enough to cover current_annual_cost.
+    """
+    gross_withdrawal = annual_withdrawal_rate * portfolio_value
+    tax_on_withdrawal = calc_tax_annual(gross_withdrawal, pa, brt, hrt)
+    net_withdrawal = gross_withdrawal - tax_on_withdrawal
+    return net_withdrawal >= current_annual_cost
+
+
 ############################
 # 2) SIMULATION LOGIC
 ############################
@@ -65,21 +79,21 @@ def simulate_investment(
         initial_deposit,
         monthly_deposit,
         deposit_growth_rate,  # e.g. 0.005 => 0.5% growth each month
-        annual_return_rate,  # e.g. 0.07 => 7% annual
+        annual_return_rate,   # e.g. 0.07 => 7% annual
         annual_inflation_rate,  # e.g. 0.02 => 2% annual
-        annual_withdrawal_rate,  # e.g. 0.04 => 4% annual
+        annual_withdrawal_rate, # e.g. 0.04 => 4% annual
         target_annual_living_cost,  # e.g. 30000
         years,
-        annual_volatility,  # e.g. 0.15 => 15% stdev
+        annual_volatility,    # e.g. 0.15 => 15% stdev
         start_date,
 ):
     """
     Monthly simulation:
-      • We deposit every month until we decide to retire (no lumpsum check).
-      • 'Retire' (flip to withdraw mode) as soon as portfolio * 4% can cover your desired annual net cost
-         (or put differently: portfolio >= required_gross_annual / withdrawal_rate).
+      • We deposit every month until we retire.
+      • 'Retire' (flip to withdraw mode) as soon as net withdrawal at the chosen withdrawal rate
+        can cover your desired annual net cost (including inflation).
       • Once withdrawing, no more deposits, but we withdraw monthly = (annual withdrawal) / 12,
-         inflated each month, subject to partial if portfolio is too small.
+        inflated each month, subject to partial if portfolio is too small.
       • Returns are random draws from a normal distribution with mean = monthly_mean_return, std = monthly_std.
       • Inflation is applied monthly to your target living cost (and to the tax bracket cutoffs).
     """
@@ -101,6 +115,9 @@ def simulate_investment(
     portfolio_values = []
     withdrawal_values = []
 
+    # NEW: Track potential monthly net withdrawal if we retired *this* month
+    potential_monthly_net_withdrawals = []
+
     current_monthly_deposit = float(monthly_deposit)
     current_annual_cost = float(target_annual_living_cost)
 
@@ -120,23 +137,19 @@ def simulate_investment(
         monthly_return = random.gauss(monthly_return_mean, monthly_std)
         portfolio_value *= (1 + monthly_return)
 
-        # 3) check if we have 'enough' to retire.
-        #    Enough means: annual_withdrawal_rate * portfolio >= required gross annual to net your cost
-        #    So if portfolio >= required_gross_annual / annual_withdrawal_rate, we can retire.
-        #    We'll figure out required_gross_annual from the current_annual_cost.
+        # 3) check if we have 'enough' to retire, using net withdrawal logic
         pa, brt, hrt = get_tax_brackets_for_factor(tax_factor)
-        needed_gross_annual = required_gross_annual_for_net_annual(current_annual_cost, pa, brt, hrt)
-        threshold_for_retire = needed_gross_annual / max(1e-9, annual_withdrawal_rate)
-
-        if (not withdrawing) and (portfolio_value >= threshold_for_retire):
+        if (not withdrawing) and can_retire_now(portfolio_value, annual_withdrawal_rate, current_annual_cost, pa, brt, hrt):
             withdrawing = True
             start_withdrawal_date = current_date
 
         # 4) if withdrawing, withdraw monthly from the portfolio.
-        #    The "annual withdrawal" is the needed gross for your annual cost, i.e. needed_gross_annual.
-        #    We take 1/12 of that each month.  If the portfolio doesn't have enough, we only withdraw partial.
-        monthly_gross_needed = needed_gross_annual / 12.0
+        #    The "annual withdrawal" is the needed gross for your annual cost, i.e. enough to net current_annual_cost.
+        #    We'll compute that by reversing the tax function each month.
+        #    Alternatively, you can keep the existing approach to ensure you always withdraw exactly what's needed.
         if withdrawing:
+            needed_gross_annual = required_gross_annual_for_net_annual(current_annual_cost, pa, brt, hrt)
+            monthly_gross_needed = needed_gross_annual / 12.0
             if portfolio_value >= monthly_gross_needed:
                 withdrawal_amt = monthly_gross_needed
             else:
@@ -148,16 +161,24 @@ def simulate_investment(
 
         total_withdrawn += withdrawal_amt
 
-        # 5) track for plotting
+        # track for plotting
         dates_list.append(current_date)
         portfolio_values.append(portfolio_value)
         withdrawal_values.append(withdrawal_amt)
+
+        # 5) calculate potential net withdrawal *if* you retired now
+        #    (this is purely for visualization, doesn't affect actual logic)
+        gross_withdrawal_now = annual_withdrawal_rate * portfolio_value
+        tax_on_withdrawal_now = calc_tax_annual(gross_withdrawal_now, pa, brt, hrt)
+        net_annual_withdrawal_now = gross_withdrawal_now - tax_on_withdrawal_now
+        potential_monthly_net_withdrawal = net_annual_withdrawal_now / 12.0
+        potential_monthly_net_withdrawals.append(potential_monthly_net_withdrawal)
 
         # 6) inflation increments for next month
         current_annual_cost *= (1 + monthly_inflation)
         tax_factor *= (1 + monthly_inflation)
 
-    return dates_list, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn
+    return dates_list, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn, potential_monthly_net_withdrawals
 
 
 def simulate_average_simulation(
@@ -177,10 +198,11 @@ def simulate_average_simulation(
     total_months = years * 12
     aggregated_portfolio = [0.0] * total_months
     aggregated_withdrawal = [0.0] * total_months
+    aggregated_potential_net_wd = [0.0] * total_months
     dates = None
 
     for _ in range(num_simulations):
-        d, pv, wv, _, _ = simulate_investment(
+        d, pv, wv, _, _, pmwd = simulate_investment(
             initial_deposit,
             monthly_deposit,
             deposit_growth_rate,
@@ -197,10 +219,12 @@ def simulate_average_simulation(
         for i in range(total_months):
             aggregated_portfolio[i] += pv[i]
             aggregated_withdrawal[i] += wv[i]
+            aggregated_potential_net_wd[i] += pmwd[i]
 
     avg_portfolio = [p / num_simulations for p in aggregated_portfolio]
     avg_withdrawal = [w / num_simulations for w in aggregated_withdrawal]
-    return dates, avg_portfolio, avg_withdrawal
+    avg_potential_wd = [x / num_simulations for x in aggregated_potential_net_wd]
+    return dates, avg_portfolio, avg_withdrawal, avg_potential_wd
 
 
 def run_monte_carlo(
@@ -223,7 +247,7 @@ def run_monte_carlo(
     """
     successes = 0
     for _ in range(num_simulations):
-        _, pv, _, wd_date, _ = simulate_investment(
+        _, pv, _, wd_date, _, _ = simulate_investment(
             initial_deposit,
             monthly_deposit,
             deposit_growth_rate,
@@ -419,7 +443,7 @@ def main():
     )
 
     # === AVERAGE SIM
-    avg_dates, avg_portfolio, avg_withdrawals = simulate_average_simulation(
+    avg_dates, avg_portfolio, avg_withdrawals, avg_potential_wds = simulate_average_simulation(
         user_initial_deposit,
         user_monthly_deposit,
         user_deposit_growth_rate,
@@ -441,6 +465,7 @@ def main():
     year_end_x = []
     year_end_port = []
     year_end_wd = []
+    year_end_potential = []
 
     for idx in year_end_indices:
         if idx >= total_months:
@@ -451,6 +476,7 @@ def main():
         year_start = idx - 11
         sum_wd = sum(avg_withdrawals[year_start:idx + 1])
         year_end_wd.append(sum_wd)
+        year_end_potential.append(avg_potential_wds[idx])  # just pick the last monthly potential in that year
 
     fig.add_trace(
         go.Scatter(
@@ -468,6 +494,15 @@ def main():
             name="Yearly Withdrawal (Avg)",
             mode='lines+markers',
             line=dict(color='yellow', width=2, dash='dot')
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=year_end_x,
+            y=year_end_potential,
+            name="Potential Net WD (Year-End)",
+            mode='lines+markers',
+            line=dict(color='magenta', width=2)
         )
     )
 
