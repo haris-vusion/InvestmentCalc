@@ -540,9 +540,10 @@ def main():
             showarrow=True,
             arrowhead=2,
             ax=0,
-            ay=-40
+            ay=-40,
+            font=dict(color="green"),
+            arrowcolor="green"
         )
-
     # Format the y-axis to 1 decimal place
     fig.update_yaxes(tickformat=".1f")
 
