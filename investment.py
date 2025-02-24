@@ -6,7 +6,9 @@ import os
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-# 1) Tax & Utility Functions
+# -----------------------
+# 1) Tax & Utility Funcs
+# -----------------------
 BASE_PERSONAL_ALLOWANCE = 12570
 BASE_BASIC_RATE_LIMIT   = 50270
 BASE_HIGHER_RATE_LIMIT  = 125140
@@ -48,7 +50,9 @@ def get_tax_brackets_for_year(year, annual_inflation_rate):
     hrt = BASE_HIGHER_RATE_LIMIT * factor
     return pa, brt, hrt
 
-# 2) Simulation
+# -----------------------
+# 2) Simulation Logic
+# -----------------------
 def simulate_investment(
     initial_deposit,
     monthly_deposit,
@@ -158,7 +162,9 @@ def simulate_average_simulation(
     avg_withdrawal = [w / num_simulations for w in aggregated_withdrawal]
     return dates, avg_portfolio, avg_withdrawal
 
+# -----------------------
 # 3) Plot & Summaries
+# -----------------------
 def create_plot(dates, portfolio_values, withdrawal_values):
     fig = go.Figure()
     fig.add_trace(
@@ -204,7 +210,9 @@ def display_summary(start_withdrawal_date, total_withdrawn, portfolio_values, st
         st.write(f"• Final average portfolio value: £{portfolio_values[-1]:,.2f}")
         st.write(f"• Total average withdrawn: £{total_withdrawn:,.2f}")
 
+# -----------------------
 # 4) Monte Carlo & Memes
+# -----------------------
 def run_monte_carlo(
     initial_deposit,
     monthly_deposit,
@@ -262,14 +270,16 @@ def display_memes(probability):
         st.write("Could not load memes from folder:", meme_folder)
         st.write(e)
 
+# -----------------------
 # 5) Main App
+# -----------------------
 def main():
-    # Minimal custom CSS to style the success probability
+    # Minimal custom CSS
     st.markdown("""
         <style>
-        .big-metric {
+        .small-metric {
             text-align: center;
-            font-size: 48px;
+            font-size: 32px;
             font-weight: 600;
             margin-top: 10px;
             margin-bottom: 10px;
@@ -280,13 +290,14 @@ def main():
             padding: 15px;
             margin-bottom: 20px;
         }
+        .center-text {
+            text-align: center;
+        }
         </style>
     """, unsafe_allow_html=True)
 
-    # Show an initial prompt at the top
-    st.info("Welcome! Adjust the parameters in the sidebar to see how your financial future unfolds.")
-
     st.title("Haris' Lods of Emone Simulator")
+
     st.write(
         "A sleek, user-focused simulator that factors in a simplified UK tax system, "
         "inflation-adjusted brackets, and monthly deposit growth. Your living cost is treated **post-tax**."
@@ -358,71 +369,78 @@ def main():
         help="Number of runs for both the average curve and success probability."
     )
 
-    # 1) Compute success probability & color code it
-    probability = run_monte_carlo(
-        initial_deposit,
-        monthly_deposit,
-        deposit_growth_rate,
-        annual_return_rate,
-        annual_inflation_rate,
-        annual_withdrawal_rate,
-        target_annual_living_cost,
-        years,
-        annual_volatility,
-        start_date,
-        int(num_simulations)
-    )
+    # Run Simulation button
+    run_it = st.sidebar.button("Run Simulation")
 
-    # Decide color: green if >=50%, else red
-    if probability >= 50:
-        color = "#2ecc71"  # green
+    if not run_it:
+        # Show a welcome prompt, centered, if user hasn't run the sim yet
+        st.markdown("## Welcome!")
+        st.markdown("<p class='center-text'>Adjust the parameters in the sidebar and click <strong>Run Simulation</strong> to begin.</p>", unsafe_allow_html=True)
     else:
-        color = "#e74c3c"  # red
+        # 1) Compute success probability & color code it
+        probability = run_monte_carlo(
+            initial_deposit,
+            monthly_deposit,
+            deposit_growth_rate,
+            annual_return_rate,
+            annual_inflation_rate,
+            annual_withdrawal_rate,
+            target_annual_living_cost,
+            years,
+            annual_volatility,
+            start_date,
+            int(num_simulations)
+        )
 
-    # Show the success probability in a big metric
-    st.markdown(
-        f"<div class='subtle-box'><div class='big-metric' style='color:{color}'>"
-        f"Monte Carlo Success Probability: {probability:.2f}%"
-        f"</div></div>",
-        unsafe_allow_html=True
-    )
+        if probability >= 50:
+            color = "#2ecc71"  # green
+        else:
+            color = "#e74c3c"  # red
 
-    # 2) Plot average results
-    dates, avg_portfolio, avg_withdrawal = simulate_average_simulation(
-        initial_deposit,
-        monthly_deposit,
-        deposit_growth_rate,
-        annual_return_rate,
-        annual_inflation_rate,
-        annual_withdrawal_rate,
-        target_annual_living_cost,
-        years,
-        annual_volatility,
-        start_date,
-        int(num_simulations)
-    )
-    fig = create_plot(dates, avg_portfolio, avg_withdrawal)
-    st.plotly_chart(fig, use_container_width=True)
+        st.markdown(
+            f"<div class='subtle-box'><div class='small-metric' style='color:{color}'>"
+            f"Monte Carlo Success Probability: {probability:.2f}%"
+            f"</div></div>",
+            unsafe_allow_html=True
+        )
 
-    # 3) Run one simulation for the summary
-    sim_dates, portfolio_vals, withdraw_vals, start_wd_date, total_wd = simulate_investment(
-        initial_deposit,
-        monthly_deposit,
-        deposit_growth_rate,
-        annual_return_rate,
-        annual_inflation_rate,
-        annual_withdrawal_rate,
-        target_annual_living_cost,
-        years,
-        annual_volatility,
-        start_date
-    )
-    display_summary(start_wd_date, total_wd, portfolio_vals, start_date)
+        # 2) Plot average results
+        dates, avg_portfolio, avg_withdrawal = simulate_average_simulation(
+            initial_deposit,
+            monthly_deposit,
+            deposit_growth_rate,
+            annual_return_rate,
+            annual_inflation_rate,
+            annual_withdrawal_rate,
+            target_annual_living_cost,
+            years,
+            annual_volatility,
+            start_date,
+            int(num_simulations)
+        )
+        fig = create_plot(dates, avg_portfolio, avg_withdrawal)
+        st.plotly_chart(fig, use_container_width=True)
 
-    # 4) Meme time
-    display_memes(probability)
+        # 3) Run one simulation for the summary
+        sim_dates, portfolio_vals, withdraw_vals, start_wd_date, total_wd = simulate_investment(
+            initial_deposit,
+            monthly_deposit,
+            deposit_growth_rate,
+            annual_return_rate,
+            annual_inflation_rate,
+            annual_withdrawal_rate,
+            target_annual_living_cost,
+            years,
+            annual_volatility,
+            start_date
+        )
+        display_summary(start_wd_date, total_wd, portfolio_vals, start_date)
+
+        # 4) Meme time
+        display_memes(probability)
 
 if __name__ == "__main__":
     main()
+
 
 
