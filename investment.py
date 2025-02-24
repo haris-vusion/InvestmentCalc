@@ -443,6 +443,7 @@ def main():
         user_num_sims,
         user_mode
     )
+    st.write(f"DEBUG: target cost = {user_target_annual_living_cost}")
 
     # Build a yearly plot
     fig = go.Figure()
