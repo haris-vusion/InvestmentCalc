@@ -375,7 +375,6 @@ def main():
         0.2,
         help="Expected annual inflation, also used to adjust tax brackets every 5 years."
     )
-    # This slider is for monthly deposit growth, 0.0% to 2.0% monthly, default 0.1% monthly
     user_deposit_growth_rate = st.sidebar.slider(
         "Monthly Deposit Growth Rate (%)",
         0.0, 2.0,
@@ -427,13 +426,13 @@ def main():
     )
 
     # === Convert user params from % => decimal where needed ===
-    user_annual_inflation_rate   /= 100.0  # e.g., 4.8 => 0.048
-    user_deposit_growth_rate     /= 100.0  # e.g., 0.1 => 0.001
-    user_annual_return_rate      /= 100.0  # e.g., 14.8 => 0.148
-    user_annual_withdrawal_rate  /= 100.0  # e.g., 4.0 => 0.04
-    user_annual_volatility       /= 100.0  # e.g., 15.0 => 0.15
+    user_annual_inflation_rate   /= 100.0
+    user_deposit_growth_rate     /= 100.0
+    user_annual_return_rate      /= 100.0
+    user_annual_withdrawal_rate  /= 100.0
+    user_annual_volatility       /= 100.0
 
-    # Function to check float equality
+    # Quick function to check float equality
     def floats_match(a, b):
         return abs(a - b) < 1e-9
 
@@ -452,12 +451,11 @@ def main():
         (user_num_simulations == default_params["num_simulations"])
     )
 
-    # If unchanged, prompt user to tweak something
     if unchanged:
         st.markdown("## Welcome!")
         st.write("Adjust the parameters in the sidebar to begin the auto-run simulation.\n\n"
                  "You'll see the results here as soon as you change something!")
-        return  # End the main() here, no simulation is shown
+        return
 
     # === Monte Carlo success probability ===
     probability = run_monte_carlo(
@@ -475,11 +473,7 @@ def main():
     )
 
     # Color the success probability metric
-    if probability >= 50:
-        color = "#2ecc71"  # green
-    else:
-        color = "#e74c3c"  # red
-
+    color = "#2ecc71" if probability >= 50 else "#e74c3c"
     st.markdown(
         f"<div class='subtle-box'><div class='small-metric' style='color:{color}'>"
         f"Monte Carlo Success Probability: {probability:.2f}%"
@@ -487,21 +481,7 @@ def main():
         unsafe_allow_html=True
     )
 
-    # === SINGLE RUN (for chart + summary) ===
-    single_dates, single_portfolio, single_withdrawals, single_start_wd, single_total_wd = simulate_investment(
-        user_initial_deposit,
-        user_monthly_deposit,
-        user_deposit_growth_rate,
-        user_annual_return_rate,
-        user_annual_inflation_rate,
-        user_annual_withdrawal_rate,
-        user_target_annual_living_cost,
-        user_years,
-        user_annual_volatility,
-        user_start_date
-    )
-
-    # === AVERAGE RUN (for chart) ===
+    # === AVERAGE SIMULATION ONLY ===
     avg_dates, avg_portfolio, avg_withdrawals = simulate_average_simulation(
         user_initial_deposit,
         user_monthly_deposit,
@@ -516,49 +496,21 @@ def main():
         int(user_num_simulations)
     )
 
-    # --- CREATE FIGURE ---
+    # Build figure
     fig = go.Figure()
 
-    # (A) Compute Yearly Values from the Average Simulation
-    # We sample at the end of each year (e.g., index 11 for year 1, 23 for year 2, etc.)
-    total_months = len(avg_dates)  # should be user_years * 12
-    year_dates = []
-    year_portfolio = []
-    year_customdata = []  # each entry: [nominal_yearly_withdrawal, adjusted_yearly_withdrawal]
-    for i in range(user_years):
-        idx = (i + 1) * 12 - 1  # end-of-year index
-        if idx >= total_months:
-            break
-        year_dates.append(avg_dates[idx])
-        p = avg_portfolio[idx]
-        year_portfolio.append(p)
-        nominal = p * user_annual_withdrawal_rate
-        # Compute inflation factor for (i+1) years elapsed
-        factor = (1 + user_annual_inflation_rate) ** (i + 1)
-        adjusted = nominal / factor
-        year_customdata.append([nominal, adjusted])
-
-    # (B) Add the trace that shows the yearly potential withdrawal info on the average portfolio line
+    # Plot the average portfolio
     fig.add_trace(
         go.Scatter(
-            x=year_dates,
-            y=year_portfolio,
-            mode='markers+lines',
+            x=avg_dates,
+            y=avg_portfolio,
+            mode='lines',
             line=dict(color='#17becf', width=3),
-            marker=dict(size=8),
-            name='Yearly Portfolio (Potential Withdrawal)',
-            customdata=year_customdata,
-            hovertemplate=(
-                "Year: %{x|%Y-%m-%d}<br>"
-                "Year-End Portfolio: £%{y:,.2f}<br>"
-                "Potential Yearly Withdrawal: £%{customdata[0]:,.2f} "
-                "(adj. £%{customdata[1]:,.2f})<br>"
-                "<extra></extra>"
-            )
+            name='Average Portfolio (£)'
         )
     )
 
-    # (E) Average withdrawals trace (if still desired)
+    # Plot the average withdrawals
     fig.add_trace(
         go.Scatter(
             x=avg_dates,
@@ -569,14 +521,17 @@ def main():
         )
     )
 
-    # If single-run withdrawals started, add a vertical line with annotation
-    if single_start_wd is not None:
-        x_value = single_start_wd.isoformat() if isinstance(single_start_wd, datetime) else single_start_wd
+    # === DETECT "WITHDRAWAL START" IN AVERAGE SCENARIO ===
+    # We find the first month where avg_withdrawals > 0
+    first_withdraw_idx = next((i for i, w in enumerate(avg_withdrawals) if w > 1e-9), None)
+    if first_withdraw_idx is not None:
+        # We'll add a vertical line + annotation at that point
+        x_value = avg_dates[first_withdraw_idx]
         fig.add_vline(x=x_value, line_width=2, line_dash="dash", line_color="green")
         fig.add_annotation(
             x=x_value,
-            y=max(single_portfolio),
-            text="Withdrawal Start",
+            y=avg_portfolio[first_withdraw_idx],
+            text="Withdrawal Start (Avg)",
             showarrow=True,
             arrowhead=2,
             ax=0,
@@ -585,21 +540,23 @@ def main():
             arrowcolor="green"
         )
 
-    # Y-axis formatting
+    # Format the y-axis
     fig.update_yaxes(tickformat=",.2f")
     fig.update_layout(
-        title="Portfolio Growth & Withdrawals Over Time",
+        title="Portfolio Growth & Withdrawals Over Time (Average Only)",
         xaxis_title="Date",
         yaxis_title="£",
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=40, r=40, t=60, b=40)
     )
-    # --- Add milestone markers on the average portfolio line ---
+
+    # Add milestone markers on the average portfolio line
     milestones = [10000, 100000, 250000, 500000, 1000000, 10000000, 50000000, 100000000, 250000000, 500000000]
     milestone_x = []
     milestone_y = []
     milestone_text = []
+
     for milestone in milestones:
         idx = next((i for i, p in enumerate(avg_portfolio) if p >= milestone), None)
         if idx is not None:
@@ -608,10 +565,11 @@ def main():
             if milestone == milestones[-1]:
                 milestone_text.append(f"£{milestone/1e6:.0f}m – Billionaire!")
             else:
-                if milestone < 1000000:
-                    milestone_text.append(f"£{milestone/1000:.0f}k")
+                if milestone < 1_000_000:
+                    milestone_text.append(f"£{milestone/1_000:.0f}k")
                 else:
                     milestone_text.append(f"£{milestone/1e6:.0f}m")
+
     fig.add_trace(
         go.Scatter(
             x=milestone_x,
@@ -627,7 +585,7 @@ def main():
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # === SUMMARY (for average scenario, as example) ===
+    # === SUMMARY (for average scenario) ===
     display_summary_for_average(
         avg_dates,
         avg_portfolio,
@@ -644,7 +602,6 @@ def main():
 
     # === Meme time ===
     display_memes(probability)
-
 
 if __name__ == "__main__":
     main()
