@@ -166,6 +166,7 @@ def simulate_investment(
 
     return dates_list, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn
 
+
 def simulate_average_simulation(
     initial_deposit,
     monthly_deposit,
