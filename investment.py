@@ -504,6 +504,12 @@ def main():
         int(user_num_simulations)
     )
 
+    ### ADDED: Potential monthly withdrawal for each average data point ###
+    avg_potential_withdrawals = [
+        p * user_annual_withdrawal_rate / 12.0
+        for p in avg_portfolio
+    ]
+
     # === CREATE COMBINED FIGURE ===
     fig = go.Figure()
 
@@ -529,15 +535,24 @@ def main():
     )
 
     # Average portfolio
+    ### ADDED: pass `customdata` and `hovertemplate` to show potential monthly withdrawal
     fig.add_trace(
         go.Scatter(
             x=avg_dates,
             y=avg_portfolio,
             mode='lines',
             line=dict(color='green', width=2),
-            name='Average Portfolio (£)'
+            name='Average Portfolio (£)',
+            customdata=[ [pmw] for pmw in avg_potential_withdrawals ],
+            hovertemplate=(
+                "Date: %{x|%Y-%m-%d}<br>"
+                "Avg Portfolio: £%{y:,.2f}<br>"
+                "Potential Monthly Withdrawal: £%{customdata[0]:,.2f}"
+                "<extra></extra>"
+            )
         )
     )
+
     # Average withdrawals
     fig.add_trace(
         go.Scatter(
@@ -565,7 +580,8 @@ def main():
             font=dict(color="green"),
             arrowcolor="green"
         )
-    # Format the y-axis to 1 decimal place
+
+    # Format the y-axis to 2 decimal places w/ thousands separator
     fig.update_yaxes(tickformat=",.2f")
 
     fig.update_layout(
@@ -578,7 +594,7 @@ def main():
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # === SINGLE RUN SUMMARY ===
+    # === SUMMARY (for average scenario, as example) ===
     display_summary_for_average(
         avg_dates,
         avg_portfolio,
@@ -587,7 +603,6 @@ def main():
     )
 
     # === INFLATION EQUIVALENCE NOTE ===
-    # e.g., after 'user_years' years, how much is £100 today in future terms?
     inflation_factor = (1 + user_annual_inflation_rate) ** user_years
     st.write(
         f"**Inflation Check:** With {user_annual_inflation_rate*100:.2f}% annual inflation over {user_years} years, "
@@ -596,6 +611,7 @@ def main():
 
     # === Meme time ===
     display_memes(probability)
+
 
 if __name__ == "__main__":
     main()
