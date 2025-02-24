@@ -555,27 +555,6 @@ def main():
         )
     )
 
-    # (C) Single-run portfolio
-    fig.add_trace(
-        go.Scatter(
-            x=single_dates,
-            y=single_portfolio,
-            mode='lines',
-            line=dict(color='blue', width=2),
-            name='Single-Run Portfolio (£)'
-        )
-    )
-
-    # (D) Single-run withdrawals
-    fig.add_trace(
-        go.Scatter(
-            x=single_dates,
-            y=single_withdrawals,
-            mode='lines',
-            line=dict(color='red', width=2, dash='dot'),
-            name='Single-Run Monthly Withdrawal (£)'
-        )
-    )
 
     # (E) Average withdrawals
     fig.add_trace(
@@ -583,7 +562,7 @@ def main():
             x=avg_dates,
             y=avg_withdrawals,
             mode='lines',
-            line=dict(color='orange', width=2, dash='dot'),
+            line=dict(color='blue', width=2,),
             name='Average Monthly Withdrawal (£)'
         )
     )
