@@ -31,6 +31,7 @@ def calc_net_annual(gross, pa, brt, hrt):
     return gross - calc_tax_annual(gross, pa, brt, hrt)
 
 def required_gross_annual_for_net_annual(net_annual, pa, brt, hrt):
+    """Binary search to find how much gross is needed to net a certain amount."""
     if net_annual <= 0:
         return 0.0
     low, high = 0.0, 2_000_000.0
@@ -43,6 +44,10 @@ def required_gross_annual_for_net_annual(net_annual, pa, brt, hrt):
     return high
 
 def get_tax_brackets_for_year(year, annual_inflation_rate):
+    """
+    Every 5 years, tax brackets get inflated by (1 + annual_inflation_rate)^5.
+    year // 5 => how many 5-year chunks have passed.
+    """
     inflation_periods = year // 5
     factor = (1 + annual_inflation_rate) ** (5 * inflation_periods)
     pa  = BASE_PERSONAL_ALLOWANCE * factor
@@ -65,6 +70,10 @@ def simulate_investment(
     annual_volatility,
     start_date
 ):
+    """
+    Runs a single simulation path with monthly compounding, monthly deposit growth,
+    and an automatic 'switch to withdrawals' once the portfolio can sustain the net annual cost.
+    """
     total_months = years * 12
     monthly_mean_return = (1 + annual_return_rate) ** (1/12) - 1
     monthly_std = annual_volatility / (12 ** 0.5)
@@ -85,35 +94,44 @@ def simulate_investment(
 
     for month in range(total_months):
         current_date = start_date + relativedelta(months=+month)
+
+        # Adjust net monthly cost by inflation
         if month == 0:
             this_month_net_cost = initial_monthly_net_cost
         else:
             this_month_net_cost = monthly_net_costs[-1] * (1 + monthly_inflation_rate)
 
+        # Check if we should start withdrawing
         required_portfolio = (this_month_net_cost * 12) / annual_withdrawal_rate
         if not withdrawing and portfolio_value >= required_portfolio:
             withdrawing = True
             start_withdrawal_date = current_date
 
+        # Grow the monthly deposit
         if month > 0:
             current_monthly_deposit *= (1 + deposit_growth_rate)
         portfolio_value += current_monthly_deposit
 
+        # Random monthly return
         current_month_return = random.gauss(monthly_mean_return, monthly_std)
         portfolio_value *= (1 + current_month_return)
 
+        # If withdrawing, we figure out the gross needed to net this_month_net_cost
         if withdrawing:
             current_year = month // 12
             pa, brt, hrt = get_tax_brackets_for_year(current_year, annual_inflation_rate)
             net_annual_needed = this_month_net_cost * 12
             gross_annual_needed = required_gross_annual_for_net_annual(net_annual_needed, pa, brt, hrt)
             monthly_gross_needed = gross_annual_needed / 12.0
+
             withdrawal_amt = min(monthly_gross_needed, portfolio_value)
             portfolio_value -= withdrawal_amt
         else:
             withdrawal_amt = 0.0
 
         total_withdrawn += withdrawal_amt
+
+        # Record the data
         dates_list.append(current_date)
         portfolio_values.append(portfolio_value)
         withdrawal_values.append(withdrawal_amt)
@@ -134,6 +152,9 @@ def simulate_average_simulation(
     start_date,
     num_simulations
 ):
+    """
+    Runs multiple simulations and returns the average portfolio & withdrawals over time.
+    """
     total_months = years * 12
     aggregated_portfolio = [0.0] * total_months
     aggregated_withdrawal = [0.0] * total_months
@@ -226,6 +247,9 @@ def run_monte_carlo(
     start_date,
     num_simulations
 ):
+    """
+    Counts how many simulations both start withdrawals AND end with a positive portfolio balance.
+    """
     success_count = 0
     for _ in range(num_simulations):
         _, portfolio_vals, _, start_withdrawal_date, _ = simulate_investment(
@@ -240,6 +264,7 @@ def run_monte_carlo(
             annual_volatility,
             start_date
         )
+        # "Success" if it eventually started withdrawing AND had > 0 left at the end
         if start_withdrawal_date is not None and portfolio_vals[-1] > 0:
             success_count += 1
     return (success_count / num_simulations) * 100
@@ -299,110 +324,117 @@ def main():
     """, unsafe_allow_html=True)
 
     st.title("Haris' Lods of Emone Simulator")
-
     st.write(
         "A sleek, user-focused simulator that factors in a simplified UK tax system, "
         "inflation-adjusted brackets, and monthly deposit growth. Your living cost is treated **post-tax**."
     )
 
-    # Default param dictionary
+    # Default param dictionary (in PERCENT for rates)
     default_params = {
         "start_date": datetime.today().date(),
         "initial_deposit": 1000,
         "monthly_deposit": 100,
-        "annual_inflation_rate": 4.8,
-        "deposit_growth_rate": 0.1,  # 0.1% monthly => 0.001 in code, but let's store the slider's raw default
-        "annual_return_rate": 14.8,
-        "annual_withdrawal_rate": 4.0,
+        "annual_inflation_rate": 4.8,   # means 4.8% annual
+        "deposit_growth_rate": 0.1,     # means 0.1% monthly in the slider
+        "annual_return_rate": 14.8,     # means 14.8% annual
+        "annual_withdrawal_rate": 4.0,  # means 4.0% annual
         "target_annual_living_cost": 30000,
         "years": 20,
-        "annual_volatility": 15.0,
+        "annual_volatility": 15.0,      # means 15% standard deviation
         "num_simulations": 50
     }
 
-    # Sidebar
+    # === SIDEBAR ===
     st.sidebar.header("Simulation Parameters")
     user_start_date = st.sidebar.date_input(
         "Starting Date",
-        value=datetime.today(),
+        value=default_params["start_date"],
         help="When does your simulation begin?"
     )
     user_initial_deposit = st.sidebar.number_input(
         "Initial Deposit (£)",
         min_value=0,
-        value=1000,
+        value=default_params["initial_deposit"],
         step=500,
         help="How much money do you start with?"
     )
     user_monthly_deposit = st.sidebar.number_input(
         "Monthly Deposit (£)",
         min_value=0,
-        value=100,
+        value=default_params["monthly_deposit"],
         step=50,
         help="How much you contribute each month initially."
     )
     user_annual_inflation_rate = st.sidebar.slider(
         "Annual Inflation Rate (%)",
-        0.0, 7.0, 4.8, 0.2,
+        0.0, 7.0,
+        default_params["annual_inflation_rate"],
+        0.2,
         help="Expected annual inflation, also used to adjust tax brackets every 5 years."
     )
+    # This slider is for monthly deposit growth, 0.0% to 2.0% monthly, default 0.1% monthly
     user_deposit_growth_rate = st.sidebar.slider(
         "Monthly Deposit Growth Rate (%)",
-        0.0, user_annual_inflation_rate * 100, user_annual_inflation_rate * 30, 0.1,
-        help="Rate at which your monthly deposit grows over time."
+        0.0, 2.0,
+        default_params["deposit_growth_rate"],  # 0.1 => 0.1% monthly
+        0.1,
+        help="Rate at which your monthly deposit grows each month."
     )
     user_annual_return_rate = st.sidebar.slider(
         "Annual Return Rate (%)",
-        0.0, 20.0, 14.8, 0.2,
+        0.0, 20.0,
+        default_params["annual_return_rate"],
+        0.2,
         help="Projected average annual return on your portfolio."
     )
     user_annual_withdrawal_rate = st.sidebar.slider(
         "Annual Withdrawal Rate (%)",
-        0.0, 20.0, 4.0, 0.5,
+        0.0, 20.0,
+        default_params["annual_withdrawal_rate"],
+        0.5,
         help="Percentage of the portfolio you withdraw annually once you start living off it."
     )
     user_target_annual_living_cost = st.sidebar.number_input(
         "Target Net Annual Living Cost (£)",
         min_value=0,
-        value=30000,
+        value=default_params["target_annual_living_cost"],
         step=1000,
         help="How much you want to spend (post-tax) each year."
     )
     user_years = st.sidebar.slider(
         "Number of Years to Simulate",
-        1, 100, 20, 1,
+        1, 100,
+        default_params["years"],
+        1,
         help="How many years does this simulation run?"
     )
     user_annual_volatility = st.sidebar.slider(
         "Annual Volatility (%)",
-        0.0, 30.0, 15.0, 0.2,
+        0.0, 30.0,
+        default_params["annual_volatility"],
+        0.2,
         help="Market volatility (standard deviation). Higher means bigger swings."
     )
     user_num_simulations = st.sidebar.number_input(
         "Monte Carlo Simulations",
         min_value=10,
-        value=50,
+        value=default_params["num_simulations"],
         step=10,
         help="Number of runs for both the average curve and success probability."
     )
 
-    # Convert user params to the same scale as the code uses
-    # (Sliders are in %, but the code expects decimals for rates.)
-    user_annual_inflation_rate /= 100.0
-    user_deposit_growth_rate /= 100.0
-    user_annual_return_rate /= 100.0
-    user_annual_withdrawal_rate /= 100.0
-    user_annual_volatility /= 100.0
+    # === Convert user params from % => decimal where needed ===
+    user_annual_inflation_rate   /= 100.0  # e.g., 4.8 => 0.048
+    user_deposit_growth_rate     /= 100.0  # e.g., 0.1 => 0.001
+    user_annual_return_rate      /= 100.0  # e.g., 14.8 => 0.148
+    user_annual_withdrawal_rate  /= 100.0  # e.g., 4.0 => 0.04
+    user_annual_volatility       /= 100.0  # e.g., 15.0 => 0.15
 
-    # Compare user params to defaults
-    # We'll consider them "unchanged" if all match exactly
-    # (within a small float tolerance for the rates).
+    # Function to check float equality
     def floats_match(a, b):
         return abs(a - b) < 1e-9
 
-    # Convert the default deposit growth rate from 0.1 (slider) => 0.001 in code
-    # Actually let's just compare the raw slider value: user_deposit_growth_rate * 100 == 0.1
-    # But let's keep it simple:
+    # We'll consider them "unchanged" if all match exactly (within float tolerance).
     unchanged = (
         (user_start_date == default_params["start_date"]) and
         (user_initial_deposit == default_params["initial_deposit"]) and
@@ -417,14 +449,14 @@ def main():
         (user_num_simulations == default_params["num_simulations"])
     )
 
+    # If unchanged, prompt user to tweak something
     if unchanged:
-        # Show a friendly welcome prompt, no "0.00%" nonsense
         st.markdown("## Welcome!")
         st.write("Adjust the parameters in the sidebar to begin the auto-run simulation.\n\n"
                  "You'll see the results here as soon as you change something!")
         return  # End the main() here, no simulation is shown
 
-    # If user changed something, run everything automatically
+    # === If user changed something, run everything automatically ===
     probability = run_monte_carlo(
         user_initial_deposit,
         user_monthly_deposit,
@@ -439,7 +471,7 @@ def main():
         int(user_num_simulations)
     )
 
-    # Color the metric
+    # Color the success probability metric
     if probability >= 50:
         color = "#2ecc71"  # green
     else:
@@ -452,7 +484,7 @@ def main():
         unsafe_allow_html=True
     )
 
-    # Average simulation
+    # === Average simulation (for plotting) ===
     dates, avg_portfolio, avg_withdrawal = simulate_average_simulation(
         user_initial_deposit,
         user_monthly_deposit,
@@ -469,7 +501,7 @@ def main():
     fig = create_plot(dates, avg_portfolio, avg_withdrawal)
     st.plotly_chart(fig, use_container_width=True)
 
-    # Single sim for summary
+    # === Single sim for summary display ===
     sim_dates, portfolio_vals, withdraw_vals, start_wd_date, total_wd = simulate_investment(
         user_initial_deposit,
         user_monthly_deposit,
@@ -484,7 +516,7 @@ def main():
     )
     display_summary(start_wd_date, total_wd, portfolio_vals, user_start_date)
 
-    # Meme time
+    # === Meme time ===
     display_memes(probability)
 
 if __name__ == "__main__":
