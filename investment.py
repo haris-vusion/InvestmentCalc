@@ -6,9 +6,9 @@ import os
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-# -----------------------
-# 1) Tax & Utility Funcs
-# -----------------------
+########################
+# 1) TAX & UTILITY FUNCS
+########################
 BASE_PERSONAL_ALLOWANCE = 12570
 BASE_BASIC_RATE_LIMIT   = 50270
 BASE_HIGHER_RATE_LIMIT  = 125140
@@ -50,9 +50,9 @@ def get_tax_brackets_for_year(year, annual_inflation_rate):
     hrt = BASE_HIGHER_RATE_LIMIT * factor
     return pa, brt, hrt
 
-# -----------------------
-# 2) Simulation Logic
-# -----------------------
+############################
+# 2) SIMULATION LOGIC
+############################
 def simulate_investment(
     initial_deposit,
     monthly_deposit,
@@ -162,9 +162,9 @@ def simulate_average_simulation(
     avg_withdrawal = [w / num_simulations for w in aggregated_withdrawal]
     return dates, avg_portfolio, avg_withdrawal
 
-# -----------------------
-# 3) Plot & Summaries
-# -----------------------
+############################
+# 3) PLOTTING & SUMMARIES
+############################
 def create_plot(dates, portfolio_values, withdrawal_values):
     fig = go.Figure()
     fig.add_trace(
@@ -210,9 +210,9 @@ def display_summary(start_withdrawal_date, total_withdrawn, portfolio_values, st
         st.write(f"• Final average portfolio value: £{portfolio_values[-1]:,.2f}")
         st.write(f"• Total average withdrawn: £{total_withdrawn:,.2f}")
 
-# -----------------------
-# 4) Monte Carlo & Memes
-# -----------------------
+##############################
+# 4) MONTE CARLO & MEMES
+##############################
 def run_monte_carlo(
     initial_deposit,
     monthly_deposit,
@@ -270,10 +270,12 @@ def display_memes(probability):
         st.write("Could not load memes from folder:", meme_folder)
         st.write(e)
 
-# -----------------------
-# 5) Main App
-# -----------------------
+##############################
+# 5) MAIN APP
+##############################
 def main():
+    st.set_page_config(page_title="Haris' Lods of Emone", layout="wide")
+
     # Minimal custom CSS
     st.markdown("""
         <style>
@@ -303,65 +305,80 @@ def main():
         "inflation-adjusted brackets, and monthly deposit growth. Your living cost is treated **post-tax**."
     )
 
+    # Default param dictionary
+    default_params = {
+        "start_date": datetime.today().date(),
+        "initial_deposit": 1000,
+        "monthly_deposit": 100,
+        "annual_inflation_rate": 4.8,
+        "deposit_growth_rate": 0.1,  # 0.1% monthly => 0.001 in code, but let's store the slider's raw default
+        "annual_return_rate": 14.8,
+        "annual_withdrawal_rate": 4.0,
+        "target_annual_living_cost": 30000,
+        "years": 20,
+        "annual_volatility": 15.0,
+        "num_simulations": 50
+    }
+
     # Sidebar
     st.sidebar.header("Simulation Parameters")
-    start_date = st.sidebar.date_input(
+    user_start_date = st.sidebar.date_input(
         "Starting Date",
         value=datetime.today(),
         help="When does your simulation begin?"
     )
-    initial_deposit = st.sidebar.number_input(
+    user_initial_deposit = st.sidebar.number_input(
         "Initial Deposit (£)",
         min_value=0,
         value=1000,
         step=500,
         help="How much money do you start with?"
     )
-    monthly_deposit = st.sidebar.number_input(
+    user_monthly_deposit = st.sidebar.number_input(
         "Monthly Deposit (£)",
         min_value=0,
         value=100,
         step=50,
         help="How much you contribute each month initially."
     )
-    annual_inflation_rate = st.sidebar.slider(
+    user_annual_inflation_rate = st.sidebar.slider(
         "Annual Inflation Rate (%)",
         0.0, 7.0, 4.8, 0.2,
         help="Expected annual inflation, also used to adjust tax brackets every 5 years."
-    ) / 100.0
-    deposit_growth_rate = st.sidebar.slider(
+    )
+    user_deposit_growth_rate = st.sidebar.slider(
         "Monthly Deposit Growth Rate (%)",
-        0.0, annual_inflation_rate * 100, annual_inflation_rate * 30, 0.1,
+        0.0, user_annual_inflation_rate * 100, user_annual_inflation_rate * 30, 0.1,
         help="Rate at which your monthly deposit grows over time."
-    ) / 100.0
-    annual_return_rate = st.sidebar.slider(
+    )
+    user_annual_return_rate = st.sidebar.slider(
         "Annual Return Rate (%)",
         0.0, 20.0, 14.8, 0.2,
         help="Projected average annual return on your portfolio."
-    ) / 100.0
-    annual_withdrawal_rate = st.sidebar.slider(
+    )
+    user_annual_withdrawal_rate = st.sidebar.slider(
         "Annual Withdrawal Rate (%)",
         0.0, 20.0, 4.0, 0.5,
         help="Percentage of the portfolio you withdraw annually once you start living off it."
-    ) / 100.0
-    target_annual_living_cost = st.sidebar.number_input(
+    )
+    user_target_annual_living_cost = st.sidebar.number_input(
         "Target Net Annual Living Cost (£)",
         min_value=0,
         value=30000,
         step=1000,
         help="How much you want to spend (post-tax) each year."
     )
-    years = st.sidebar.slider(
+    user_years = st.sidebar.slider(
         "Number of Years to Simulate",
         1, 100, 20, 1,
         help="How many years does this simulation run?"
     )
-    annual_volatility = st.sidebar.slider(
+    user_annual_volatility = st.sidebar.slider(
         "Annual Volatility (%)",
         0.0, 30.0, 15.0, 0.2,
         help="Market volatility (standard deviation). Higher means bigger swings."
-    ) / 100.0
-    num_simulations = st.sidebar.number_input(
+    )
+    user_num_simulations = st.sidebar.number_input(
         "Monte Carlo Simulations",
         min_value=10,
         value=50,
@@ -369,78 +386,106 @@ def main():
         help="Number of runs for both the average curve and success probability."
     )
 
-    # Run Simulation button
-    run_it = st.sidebar.button("Run Simulation")
+    # Convert user params to the same scale as the code uses
+    # (Sliders are in %, but the code expects decimals for rates.)
+    user_annual_inflation_rate /= 100.0
+    user_deposit_growth_rate /= 100.0
+    user_annual_return_rate /= 100.0
+    user_annual_withdrawal_rate /= 100.0
+    user_annual_volatility /= 100.0
 
-    if not run_it:
-        # Show a welcome prompt, centered, if user hasn't run the sim yet
+    # Compare user params to defaults
+    # We'll consider them "unchanged" if all match exactly
+    # (within a small float tolerance for the rates).
+    def floats_match(a, b):
+        return abs(a - b) < 1e-9
+
+    # Convert the default deposit growth rate from 0.1 (slider) => 0.001 in code
+    # Actually let's just compare the raw slider value: user_deposit_growth_rate * 100 == 0.1
+    # But let's keep it simple:
+    unchanged = (
+        (user_start_date == default_params["start_date"]) and
+        (user_initial_deposit == default_params["initial_deposit"]) and
+        (user_monthly_deposit == default_params["monthly_deposit"]) and
+        floats_match(user_annual_inflation_rate * 100.0, default_params["annual_inflation_rate"]) and
+        floats_match(user_deposit_growth_rate * 100.0, default_params["deposit_growth_rate"]) and
+        floats_match(user_annual_return_rate * 100.0, default_params["annual_return_rate"]) and
+        floats_match(user_annual_withdrawal_rate * 100.0, default_params["annual_withdrawal_rate"]) and
+        (user_target_annual_living_cost == default_params["target_annual_living_cost"]) and
+        (user_years == default_params["years"]) and
+        floats_match(user_annual_volatility * 100.0, default_params["annual_volatility"]) and
+        (user_num_simulations == default_params["num_simulations"])
+    )
+
+    if unchanged:
+        # Show a friendly welcome prompt, no "0.00%" nonsense
         st.markdown("## Welcome!")
-        st.markdown("<p class='center-text'>Adjust the parameters in the sidebar and click <strong>Run Simulation</strong> to begin.</p>", unsafe_allow_html=True)
+        st.write("Adjust the parameters in the sidebar to begin the auto-run simulation.\n\n"
+                 "You'll see the results here as soon as you change something!")
+        return  # End the main() here, no simulation is shown
+
+    # If user changed something, run everything automatically
+    probability = run_monte_carlo(
+        user_initial_deposit,
+        user_monthly_deposit,
+        user_deposit_growth_rate,
+        user_annual_return_rate,
+        user_annual_inflation_rate,
+        user_annual_withdrawal_rate,
+        user_target_annual_living_cost,
+        user_years,
+        user_annual_volatility,
+        user_start_date,
+        int(user_num_simulations)
+    )
+
+    # Color the metric
+    if probability >= 50:
+        color = "#2ecc71"  # green
     else:
-        # 1) Compute success probability & color code it
-        probability = run_monte_carlo(
-            initial_deposit,
-            monthly_deposit,
-            deposit_growth_rate,
-            annual_return_rate,
-            annual_inflation_rate,
-            annual_withdrawal_rate,
-            target_annual_living_cost,
-            years,
-            annual_volatility,
-            start_date,
-            int(num_simulations)
-        )
+        color = "#e74c3c"  # red
 
-        if probability >= 50:
-            color = "#2ecc71"  # green
-        else:
-            color = "#e74c3c"  # red
+    st.markdown(
+        f"<div class='subtle-box'><div class='small-metric' style='color:{color}'>"
+        f"Monte Carlo Success Probability: {probability:.2f}%"
+        f"</div></div>",
+        unsafe_allow_html=True
+    )
 
-        st.markdown(
-            f"<div class='subtle-box'><div class='small-metric' style='color:{color}'>"
-            f"Monte Carlo Success Probability: {probability:.2f}%"
-            f"</div></div>",
-            unsafe_allow_html=True
-        )
+    # Average simulation
+    dates, avg_portfolio, avg_withdrawal = simulate_average_simulation(
+        user_initial_deposit,
+        user_monthly_deposit,
+        user_deposit_growth_rate,
+        user_annual_return_rate,
+        user_annual_inflation_rate,
+        user_annual_withdrawal_rate,
+        user_target_annual_living_cost,
+        user_years,
+        user_annual_volatility,
+        user_start_date,
+        int(user_num_simulations)
+    )
+    fig = create_plot(dates, avg_portfolio, avg_withdrawal)
+    st.plotly_chart(fig, use_container_width=True)
 
-        # 2) Plot average results
-        dates, avg_portfolio, avg_withdrawal = simulate_average_simulation(
-            initial_deposit,
-            monthly_deposit,
-            deposit_growth_rate,
-            annual_return_rate,
-            annual_inflation_rate,
-            annual_withdrawal_rate,
-            target_annual_living_cost,
-            years,
-            annual_volatility,
-            start_date,
-            int(num_simulations)
-        )
-        fig = create_plot(dates, avg_portfolio, avg_withdrawal)
-        st.plotly_chart(fig, use_container_width=True)
+    # Single sim for summary
+    sim_dates, portfolio_vals, withdraw_vals, start_wd_date, total_wd = simulate_investment(
+        user_initial_deposit,
+        user_monthly_deposit,
+        user_deposit_growth_rate,
+        user_annual_return_rate,
+        user_annual_inflation_rate,
+        user_annual_withdrawal_rate,
+        user_target_annual_living_cost,
+        user_years,
+        user_annual_volatility,
+        user_start_date
+    )
+    display_summary(start_wd_date, total_wd, portfolio_vals, user_start_date)
 
-        # 3) Run one simulation for the summary
-        sim_dates, portfolio_vals, withdraw_vals, start_wd_date, total_wd = simulate_investment(
-            initial_deposit,
-            monthly_deposit,
-            deposit_growth_rate,
-            annual_return_rate,
-            annual_inflation_rate,
-            annual_withdrawal_rate,
-            target_annual_living_cost,
-            years,
-            annual_volatility,
-            start_date
-        )
-        display_summary(start_wd_date, total_wd, portfolio_vals, start_date)
-
-        # 4) Meme time
-        display_memes(probability)
+    # Meme time
+    display_memes(probability)
 
 if __name__ == "__main__":
     main()
-
-
-
