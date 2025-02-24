@@ -64,25 +64,22 @@ def simulate_investment(
     deposit_growth_rate,
     annual_return_rate,
     annual_inflation_rate,
-    annual_withdrawal_rate,    # Not really used now, since we rely on the net-living threshold
-    target_annual_living_cost, # In today's money
+    annual_withdrawal_rate,    # Not really used now, since we rely on net-living threshold
+    target_annual_living_cost, # in today's money
     years,
     annual_volatility,
     start_date
 ):
     """
-    Monthly simulation ensuring we only withdraw enough to net the inflation-adjusted cost.
-    If the portfolio can't sustain it, we withdraw 0.
-    Once withdrawals begin, we stop depositing.
+    A monthly simulation ensuring we only withdraw if the portfolio can fully pay
+    the inflation-adjusted net cost (including tax). Otherwise, 0. Once withdrawals begin,
+    we stop deposits.
 
-    target_annual_living_cost = e.g., 30000 in today's money
-    Each year t => inflated_annual_cost = 30000 * (1+inflation_rate)^t
-    Then we check if the portfolio >= the "gross needed / annual_withdrawal_rate"?
-    Actually, we don't even need annual_withdrawal_rate if we do direct net-living logic:
-
-    We do:
-      - If portfolio is big enough to fund that monthly net cost, we withdraw it (grossed up for tax).
-      - Otherwise, 0.
+    Steps each month:
+      1) Determine which year we're in => inflation factor for the target living cost.
+      2) Compute how much gross is needed to net that monthly fraction (1/12) of the inflated cost.
+      3) If portfolio can pay it, withdraw that amount; otherwise 0.
+      4) Once we start withdrawing, no more deposits.
     """
 
     total_months = years * 12
@@ -96,70 +93,53 @@ def simulate_investment(
 
     dates_list = []
     portfolio_values = []
-    withdrawal_values = []  # This is the GROSS withdrawal each month
+    withdrawal_values = []
 
     current_monthly_deposit = monthly_deposit
 
     for m in range(total_months):
         current_date = start_date + relativedelta(months=m)
 
-        # Determine which year we're in to inflate the cost
+        # figure out which year
         current_year = m // 12
-        # e.g., if m=0..11 => year 0, 12..23 => year 1, etc.
 
-        # The "net cost" in that year, inflation-adjusted
+        # inflation-adjusted cost for that year
         inflated_annual_cost = target_annual_living_cost * (1 + annual_inflation_rate) ** current_year
         monthly_net_cost = inflated_annual_cost / 12.0
 
-        # Check if we can sustain it. That requires us to find how much GROSS is needed to net monthly_net_cost.
+        # how much gross needed for that monthly cost
         pa, brt, hrt = get_tax_brackets_for_year(current_year, annual_inflation_rate)
-        gross_needed_per_month = required_gross_annual_for_net_annual(inflated_annual_cost, pa, brt, hrt) / 12.0
+        gross_needed_annual = required_gross_annual_for_net_annual(inflated_annual_cost, pa, brt, hrt)
+        gross_needed_monthly = gross_needed_annual / 12.0
 
-        # If portfolio >= gross_needed_per_month * 12 for the year?
-        # Actually, let's do monthly check:
-        # If portfolio can handle gross_needed_per_month, we withdraw it, else 0.
-        # But we also want a single "once I'm big enough, I retire" approach:
-        # We'll do a simple approach: if portfolio >= gross_needed_per_month, we withdraw.
-        # Once we start withdrawing, we also stop deposits.
-
+        # see if we can start withdrawing
         if not withdrawing:
-            # See if we can start withdrawing
-            if portfolio_value >= gross_needed_per_month:
+            if portfolio_value >= gross_needed_monthly:
                 withdrawing = True
                 start_withdrawal_date = current_date
 
-        # If not withdrawing, deposit
+        # if not withdrawing, deposit
         if not withdrawing:
             portfolio_value += current_monthly_deposit
-            # Grow deposit for next month
             if m > 0:
                 current_monthly_deposit *= (1 + deposit_growth_rate)
 
-        # Apply monthly return
-        current_month_return = random.gauss(monthly_mean_return, monthly_std)
-        portfolio_value *= (1 + current_month_return)
+        # apply random monthly return
+        monthly_return = random.gauss(monthly_mean_return, monthly_std)
+        portfolio_value *= (1 + monthly_return)
 
-        # If withdrawing, see if we can pay the entire monthly_net_cost
+        # if withdrawing, pay the full monthly gross if we can
         if withdrawing:
-            if portfolio_value >= gross_needed_per_month:
-                # We'll withdraw exactly what's needed to net monthly_net_cost
-                # monthly_net_cost is e.g. 2500 if 30k => 12
-                # Let's re-check the tax needed for just that monthly cost:
-                # We'll do the same approach:
-                #   gross for monthly_net_cost => required_gross_annual_for_net_annual(monthly_net_cost*12)/12
-                # But we already computed it: 'gross_needed_per_month'
-                withdrawal_amt = min(gross_needed_per_month, portfolio_value)
+            if portfolio_value >= gross_needed_monthly:
+                withdrawal_amt = gross_needed_monthly
             else:
-                # Can't sustain it => withdraw 0
                 withdrawal_amt = 0.0
-
             portfolio_value -= withdrawal_amt
         else:
             withdrawal_amt = 0.0
 
         total_withdrawn += withdrawal_amt
 
-        # Record
         dates_list.append(current_date)
         portfolio_values.append(portfolio_value)
         withdrawal_values.append(withdrawal_amt)
@@ -221,10 +201,9 @@ def display_summary_for_average(dates, portfolio, withdrawals, start_date):
     """
     import streamlit as st
 
-    # Find first month index where average withdrawal is non-zero
     first_withdraw_idx = None
     for i, w in enumerate(withdrawals):
-        if w > 1e-9:  # or just w > 0 if you prefer
+        if w > 1e-9:
             first_withdraw_idx = i
             break
 
@@ -234,12 +213,10 @@ def display_summary_for_average(dates, portfolio, withdrawals, start_date):
     st.subheader("Summary (Average Simulation)")
 
     if first_withdraw_idx is None:
-        # Never withdrew in the average scenario
         st.write("• The *average* portfolio never reached the threshold to sustain your target living cost.")
         st.write(f"• Final average portfolio value: £{final_portfolio:,.2f}")
         st.write("• Total average withdrawn: £0.00 (No withdrawals were made.)")
     else:
-        # Found a withdrawal start
         start_withdraw_date = dates[first_withdraw_idx]
         years_to_withdraw = (start_withdraw_date - start_date).days / 365.25
         st.write(
@@ -271,7 +248,7 @@ def run_monte_carlo(
     """
     success_count = 0
     for _ in range(num_simulations):
-        _, portfolio_vals, _, start_withdrawal_date, _ = simulate_investment(
+        _, portfolio_vals, _, start_wd, _ = simulate_investment(
             initial_deposit,
             monthly_deposit,
             deposit_growth_rate,
@@ -283,8 +260,7 @@ def run_monte_carlo(
             annual_volatility,
             start_date
         )
-        # "Success" if it eventually started withdrawing AND had > 0 left at the end
-        if start_withdrawal_date is not None and portfolio_vals[-1] > 0:
+        if start_wd is not None and portfolio_vals[-1] > 0:
             success_count += 1
     return (success_count / num_simulations) * 100
 
@@ -353,13 +329,13 @@ def main():
         "start_date": datetime.today().date(),
         "initial_deposit": 1000,
         "monthly_deposit": 100,
-        "annual_inflation_rate": 4.8,   # means 4.8% annual
-        "deposit_growth_rate": 0.1,     # means 0.1% monthly in the slider
-        "annual_return_rate": 14.8,     # means 14.8% annual
-        "annual_withdrawal_rate": 4.0,  # means 4.0% annual
+        "annual_inflation_rate": 4.8,   # 4.8% annual
+        "deposit_growth_rate": 0.1,     # 0.1% monthly
+        "annual_return_rate": 14.8,     # 14.8% annual
+        "annual_withdrawal_rate": 4.0,  # 4.0% annual
         "target_annual_living_cost": 30000,
         "years": 20,
-        "annual_volatility": 15.0,      # means 15% standard deviation
+        "annual_volatility": 15.0,      # 15% stdev
         "num_simulations": 50
     }
 
@@ -441,29 +417,29 @@ def main():
         help="Number of runs for both the average curve and success probability."
     )
 
-    # === Convert user params from % => decimal where needed ===
-    user_annual_inflation_rate   /= 100.0  # e.g., 4.8 => 0.048
-    user_deposit_growth_rate     /= 100.0  # e.g., 0.1 => 0.001
-    user_annual_return_rate      /= 100.0  # e.g., 14.8 => 0.148
-    user_annual_withdrawal_rate  /= 100.0  # e.g., 4.0 => 0.04
-    user_annual_volatility       /= 100.0  # e.g., 15.0 => 0.15
+    # Convert user params from % => decimal
+    user_annual_inflation_rate   /= 100.0
+    user_deposit_growth_rate     /= 100.0
+    user_annual_return_rate      /= 100.0
+    user_annual_withdrawal_rate  /= 100.0
+    user_annual_volatility       /= 100.0
 
-    # Quick function to check float equality
+    # Float check
     def floats_match(a, b):
         return abs(a - b) < 1e-9
 
-    # We'll consider them "unchanged" if all match exactly (within float tolerance).
+    # If unchanged, just prompt
     unchanged = (
         (user_start_date == default_params["start_date"]) and
         (user_initial_deposit == default_params["initial_deposit"]) and
         (user_monthly_deposit == default_params["monthly_deposit"]) and
-        floats_match(user_annual_inflation_rate * 100.0, default_params["annual_inflation_rate"]) and
-        floats_match(user_deposit_growth_rate * 100.0, default_params["deposit_growth_rate"]) and
-        floats_match(user_annual_return_rate * 100.0, default_params["annual_return_rate"]) and
-        floats_match(user_annual_withdrawal_rate * 100.0, default_params["annual_withdrawal_rate"]) and
+        floats_match(user_annual_inflation_rate*100.0, default_params["annual_inflation_rate"]) and
+        floats_match(user_deposit_growth_rate*100.0, default_params["deposit_growth_rate"]) and
+        floats_match(user_annual_return_rate*100.0, default_params["annual_return_rate"]) and
+        floats_match(user_annual_withdrawal_rate*100.0, default_params["annual_withdrawal_rate"]) and
         (user_target_annual_living_cost == default_params["target_annual_living_cost"]) and
         (user_years == default_params["years"]) and
-        floats_match(user_annual_volatility * 100.0, default_params["annual_volatility"]) and
+        floats_match(user_annual_volatility*100.0, default_params["annual_volatility"]) and
         (user_num_simulations == default_params["num_simulations"])
     )
 
@@ -473,7 +449,7 @@ def main():
                  "You'll see the results here as soon as you change something!")
         return
 
-    # === Monte Carlo success probability ===
+    # Monte Carlo success
     probability = run_monte_carlo(
         user_initial_deposit,
         user_monthly_deposit,
@@ -496,8 +472,7 @@ def main():
         unsafe_allow_html=True
     )
 
-    # === AVERAGE SIMULATION ONLY ===
-    # This returns monthly data for the average run
+    # Average simulation
     avg_dates, avg_portfolio, avg_withdrawals = simulate_average_simulation(
         user_initial_deposit,
         user_monthly_deposit,
@@ -512,102 +487,64 @@ def main():
         int(user_num_simulations)
     )
 
-    # --- CREATE FIGURE ---
+    # Build a yearly chart from monthly average data
     fig = go.Figure()
 
-    # 1) Convert monthly average data -> Yearly data
-    #    We'll sample at end of each year for the portfolio,
-    #    and sum the monthly withdrawals for that year to get a "yearly actual withdrawal."
-    total_months = len(avg_dates)  # should be user_years * 12
+    total_months = len(avg_dates)
     year_end_dates = []
     year_end_portfolio = []
-    yearly_actual_withdrawals = []  # sum of that year's monthly average withdrawals
+    yearly_withdrawals = []
 
     for year_idx in range(user_years):
-        # End-of-year month index
-        end_month_idx = (year_idx + 1) * 12 - 1
-        if end_month_idx >= total_months:
+        end_idx = (year_idx+1)*12 - 1
+        if end_idx >= total_months:
             break
+        year_end_dates.append(avg_dates[end_idx])
+        year_end_portfolio.append(avg_portfolio[end_idx])
 
-        # Portfolio at year end
-        p = avg_portfolio[end_month_idx]
-        year_end_portfolio.append(p)
+        # sum monthly avg withdrawals for that year
+        start_of_year = year_idx * 12
+        end_of_year = min((year_idx+1)*12, total_months)
+        sum_wd = sum(avg_withdrawals[start_of_year:end_of_year])
+        yearly_withdrawals.append(sum_wd)
 
-        # Date at year end
-        year_end_dates.append(avg_dates[end_month_idx])
-
-        # Sum the monthly average withdrawals for that entire year
-        start_of_year_idx = year_idx * 12
-        # e.g., if year_idx=0 => months 0..11
-        #       if year_idx=1 => months 12..23
-        # and so on
-        # Make sure we don't go out of range:
-        end_of_year_idx = min((year_idx + 1) * 12, total_months)
-        yearly_withdraw_sum = sum(avg_withdrawals[start_of_year_idx:end_of_year_idx])
-        yearly_actual_withdrawals.append(yearly_withdraw_sum)
-
-    # 2) Also compute a "Potential Yearly Withdrawal" line
-    #    i.e., a 4% rule style figure at year end: portfolio * annual_withdrawal_rate
-    #    plus an inflation-adjusted version
-    #    So each point's customdata = [nominal_yearly, adjusted_yearly]
-    year_customdata = []
-    for i, p in enumerate(year_end_portfolio):
-        # Nominal 4% rule style
-        nominal = p * user_annual_withdrawal_rate
-
-        # Adjust for partial inflation: (1 + inflation)^year
-        # i is the 0-based index, but the actual "year" is i+1
-        factor = (1 + user_annual_inflation_rate) ** (i + 1)
-        adjusted = nominal / factor
-
-        year_customdata.append([nominal, adjusted])
-
-    # 3) Add a trace for "Year-End Portfolio + Potential Yearly Withdrawal"
+    # Plot yearly portfolio
     fig.add_trace(
         go.Scatter(
             x=year_end_dates,
             y=year_end_portfolio,
-            mode='markers+lines',
+            mode='lines+markers',
             line=dict(color='#17becf', width=3),
             marker=dict(size=8),
-            name='Yearly Portfolio (Potential Withdrawal)',
-            customdata=year_customdata,
-            hovertemplate=(
-                "Year End: %{x|%Y-%m-%d}<br>"
-                "Portfolio: £%{y:,.2f}<br>"
-                "Potential Yearly Withdrawal: £%{customdata[0]:,.2f} "
-                "(adj. £%{customdata[1]:,.2f})<br>"
-                "<extra></extra>"
-            )
+            name='Year-End Portfolio (Avg)',
+            hovertemplate="Year End: %{x|%Y-%m-%d}<br>Portfolio: £%{y:,.2f}<extra></extra>"
         )
     )
 
-    # 4) Add a trace for "Yearly Actual Withdrawals" from the average scenario
+    # Plot yearly actual withdrawals
     fig.add_trace(
         go.Scatter(
             x=year_end_dates,
-            y=yearly_actual_withdrawals,
-            mode='markers+lines',
+            y=yearly_withdrawals,
+            mode='lines+markers',
             line=dict(color='yellow', width=2, dash='dot'),
             marker=dict(size=8),
             name='Yearly Actual Withdrawal (Avg)',
             hovertemplate=(
                 "Year End: %{x|%Y-%m-%d}<br>"
-                "Actual Withdrawal This Year: £%{y:,.2f}<br>"
-                "<extra></extra>"
+                "Actual Withdrawn This Year: £%{y:,.2f}<extra></extra>"
             )
         )
     )
 
-    # 5) We also want to place a vertical line when the AVERAGE scenario first starts withdrawing
-    #    i.e., the first year that had > 0 actual withdrawals
-    first_withdraw_year_idx = next((i for i, w in enumerate(yearly_actual_withdrawals) if w > 1e-9), None)
-    if first_withdraw_year_idx is not None:
-        x_value = year_end_dates[first_withdraw_year_idx]
-        fig.add_vline(x=x_value, line_width=2, line_dash="dash", line_color="green")
+    # Add vertical line if we started withdrawing
+    first_wd_year_idx = next((i for i, w in enumerate(yearly_withdrawals) if w > 1e-9), None)
+    if first_wd_year_idx is not None:
+        x_val = year_end_dates[first_wd_year_idx]
+        fig.add_vline(x=x_val, line_width=2, line_dash="dash", line_color="green")
         fig.add_annotation(
-            x=x_value,
-            y=year_end_portfolio[first_withdraw_year_idx],
+            x=x_val,
+            y=year_end_portfolio[first_wd_year_idx],
             text="Withdrawal Start (Avg)",
             showarrow=True,
             arrowhead=2,
@@ -617,8 +554,7 @@ def main():
             arrowcolor="green"
         )
 
-    # 6) Milestone markers on the average monthly portfolio
-    #    (We keep monthly for a smoother milestone detection.)
+    # Milestones on monthly data
     milestone_x = []
     milestone_y = []
     milestone_text = []
@@ -632,7 +568,7 @@ def main():
                 milestone_text.append(f"£{milestone/1e6:.0f}m – Billionaire!")
             else:
                 if milestone < 1_000_000:
-                    milestone_text.append(f"£{milestone/1_000:.0f}k")
+                    milestone_text.append(f"£{milestone/1000:.0f}k")
                 else:
                     milestone_text.append(f"£{milestone/1e6:.0f}m")
 
@@ -649,7 +585,6 @@ def main():
         )
     )
 
-    # 7) Final figure layout
     fig.update_yaxes(tickformat=",.2f")
     fig.update_layout(
         title="Portfolio Growth & Withdrawals Over Time (Average Only, Yearly)",
@@ -662,10 +597,7 @@ def main():
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # === SUMMARY (for average scenario) ===
-    # This still uses monthly data for the summary, which is fine.
-    # If you prefer a purely yearly approach, you could adapt display_summary_for_average
-    # to use the year-end data. For now, let's keep it:
+    # Summary
     display_summary_for_average(
         avg_dates,
         avg_portfolio,
@@ -673,14 +605,13 @@ def main():
         user_start_date
     )
 
-    # === INFLATION EQUIVALENCE NOTE ===
+    # Inflation check
     inflation_factor = (1 + user_annual_inflation_rate) ** user_years
     st.write(
         f"**Inflation Check:** With {user_annual_inflation_rate*100:.2f}% annual inflation over {user_years} years, "
         f"£100 **today** will be roughly £{100 * inflation_factor:.2f} in year {user_years}."
     )
 
-    # === Meme time ===
     display_memes(probability)
 
 if __name__ == "__main__":
