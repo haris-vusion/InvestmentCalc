@@ -545,7 +545,7 @@ def main():
             arrowcolor="green"
         )
     # Format the y-axis to 1 decimal place
-    fig.update_yaxes(tickformat=",.1f")
+    fig.update_yaxes(tickformat=",.2f")
 
     fig.update_layout(
         title="Portfolio Growth & Withdrawals Over Time",
