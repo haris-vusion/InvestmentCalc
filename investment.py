@@ -614,21 +614,42 @@ def main():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=40, r=40, t=60, b=40)
     )
-    fig.add_annotation(
-        xref="paper", yref="paper",
-        x=1.02, y=0.5,  # Position it to the right of the plot, vertically centered
-        text=(
-            "<b>Milestones</b><br>"
-            "£10k, £100k, £250k, £500k,<br>"
-            "£1m, £10m, £50m, £100m,<br>"
-            "£250m, £500m,<br> Billionaire!"
-        ),
-        showarrow=False,
-        font=dict(color="green", size=12),
-        bordercolor="green",
-        borderwidth=2,
-        bgcolor="white",
-        opacity=0.8
+    # --- Add milestone markers on the average portfolio line ---
+    # Define milestones and an empty container for marker data
+    milestones = [10000, 100000, 250000, 500000, 1000000, 10000000, 50000000, 100000000, 250000000, 500000000]
+    milestone_x = []
+    milestone_y = []
+    milestone_text = []
+
+    # Loop through each milestone and find when it's first reached
+    for milestone in milestones:
+        # Find first index where avg_portfolio >= milestone
+        idx = next((i for i, p in enumerate(avg_portfolio) if p >= milestone), None)
+        if idx is not None:
+            milestone_x.append(avg_dates[idx])
+            milestone_y.append(avg_portfolio[idx])
+            # For the final milestone, add a fun note
+            if milestone == milestones[-1]:
+                milestone_text.append(f"£{milestone/1e6:.0f}m – Billionaire!")
+            else:
+                # Format the milestone nicely (e.g., £10k, £100k, £1m)
+                if milestone < 1000000:
+                    milestone_text.append(f"£{milestone/1000:.0f}k")
+                else:
+                    milestone_text.append(f"£{milestone/1e6:.0f}m")
+
+    # Add these markers as a separate scatter trace (using markers+text)
+    fig.add_trace(
+        go.Scatter(
+            x=milestone_x,
+            y=milestone_y,
+            mode="markers+text",
+            text=milestone_text,
+            textposition="top center",
+            marker=dict(color="green", size=10, symbol="diamond"),
+            name="Milestones",
+            hoverinfo="none"
+        )
     )
 
     st.plotly_chart(fig, use_container_width=True)
