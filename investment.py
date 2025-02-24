@@ -116,7 +116,7 @@ def simulate_investment(
         current_month_return = random.gauss(monthly_mean_return, monthly_std)
         portfolio_value *= (1 + current_month_return)
 
-        # If withdrawing, we figure out the gross needed to net this_month_net_cost
+        # If withdrawing, figure out the gross needed to net this_month_net_cost
         if withdrawing:
             current_year = month // 12
             pa, brt, hrt = get_tax_brackets_for_year(current_year, annual_inflation_rate)
@@ -186,36 +186,6 @@ def simulate_average_simulation(
 ############################
 # 3) PLOTTING & SUMMARIES
 ############################
-def create_plot(dates, portfolio_values, withdrawal_values):
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=dates,
-            y=portfolio_values,
-            mode='lines',
-            line=dict(color='blue', width=3),
-            name='Avg. Portfolio Value (£)'
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=dates,
-            y=withdrawal_values,
-            mode='lines',
-            line=dict(color='red', width=2, dash='dot'),
-            name='Avg. Monthly Withdrawal (£)'
-        )
-    )
-    fig.update_layout(
-        title="Average Portfolio Growth & Withdrawals Over Time",
-        xaxis_title="Date",
-        yaxis_title="£",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=40, r=40, t=60, b=40)
-    )
-    return fig
-
 def display_summary(start_withdrawal_date, total_withdrawn, portfolio_values, start_date):
     st.subheader("Summary")
     if start_withdrawal_date is None:
@@ -456,7 +426,7 @@ def main():
                  "You'll see the results here as soon as you change something!")
         return  # End the main() here, no simulation is shown
 
-    # === If user changed something, run everything automatically ===
+    # === Monte Carlo success probability ===
     probability = run_monte_carlo(
         user_initial_deposit,
         user_monthly_deposit,
@@ -484,8 +454,22 @@ def main():
         unsafe_allow_html=True
     )
 
-    # === Average simulation (for plotting) ===
-    dates, avg_portfolio, avg_withdrawal = simulate_average_simulation(
+    # === SINGLE RUN (for chart + summary) ===
+    single_dates, single_portfolio, single_withdrawals, single_start_wd, single_total_wd = simulate_investment(
+        user_initial_deposit,
+        user_monthly_deposit,
+        user_deposit_growth_rate,
+        user_annual_return_rate,
+        user_annual_inflation_rate,
+        user_annual_withdrawal_rate,
+        user_target_annual_living_cost,
+        user_years,
+        user_annual_volatility,
+        user_start_date
+    )
+
+    # === AVERAGE RUN (for chart) ===
+    avg_dates, avg_portfolio, avg_withdrawals = simulate_average_simulation(
         user_initial_deposit,
         user_monthly_deposit,
         user_deposit_growth_rate,
@@ -498,23 +482,86 @@ def main():
         user_start_date,
         int(user_num_simulations)
     )
-    fig = create_plot(dates, avg_portfolio, avg_withdrawal)
+
+    # === CREATE COMBINED FIGURE ===
+    fig = go.Figure()
+
+    # Single-run portfolio
+    fig.add_trace(
+        go.Scatter(
+            x=single_dates,
+            y=single_portfolio,
+            mode='lines',
+            line=dict(color='blue', width=2),
+            name='Single-Run Portfolio (£)'
+        )
+    )
+    # Single-run withdrawals
+    fig.add_trace(
+        go.Scatter(
+            x=single_dates,
+            y=single_withdrawals,
+            mode='lines',
+            line=dict(color='red', width=2, dash='dot'),
+            name='Single-Run Monthly Withdrawal (£)'
+        )
+    )
+
+    # Average portfolio
+    fig.add_trace(
+        go.Scatter(
+            x=avg_dates,
+            y=avg_portfolio,
+            mode='lines',
+            line=dict(color='green', width=2),
+            name='Average Portfolio (£)'
+        )
+    )
+    # Average withdrawals
+    fig.add_trace(
+        go.Scatter(
+            x=avg_dates,
+            y=avg_withdrawals,
+            mode='lines',
+            line=dict(color='orange', width=2, dash='dot'),
+            name='Average Monthly Withdrawal (£)'
+        )
+    )
+
+    # Add a vertical line if single-run withdrawals started
+    if single_start_wd is not None:
+        fig.add_vline(
+            x=single_start_wd,
+            line_width=2,
+            line_dash="dash",
+            line_color="black",
+            annotation_text="Withdrawal Start",
+            annotation_position="top right"
+        )
+
+    # Format the y-axis to 1 decimal place
+    fig.update_yaxes(tickformat=".1f")
+
+    fig.update_layout(
+        title="Portfolio Growth & Withdrawals Over Time",
+        xaxis_title="Date",
+        yaxis_title="£",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=40, r=40, t=60, b=40)
+    )
     st.plotly_chart(fig, use_container_width=True)
 
-    # === Single sim for summary display ===
-    sim_dates, portfolio_vals, withdraw_vals, start_wd_date, total_wd = simulate_investment(
-        user_initial_deposit,
-        user_monthly_deposit,
-        user_deposit_growth_rate,
-        user_annual_return_rate,
-        user_annual_inflation_rate,
-        user_annual_withdrawal_rate,
-        user_target_annual_living_cost,
-        user_years,
-        user_annual_volatility,
-        user_start_date
+    # === SINGLE RUN SUMMARY ===
+    display_summary(single_start_wd, single_total_wd, single_portfolio, user_start_date)
+
+    # === INFLATION EQUIVALENCE NOTE ===
+    # e.g., after 'user_years' years, how much is £100 today in future terms?
+    inflation_factor = (1 + user_annual_inflation_rate) ** user_years
+    st.write(
+        f"**Inflation Check:** With {user_annual_inflation_rate*100:.2f}% annual inflation over {user_years} years, "
+        f"£100 **today** will be roughly £{100 * inflation_factor:.2f} in year {user_years}."
     )
-    display_summary(start_wd_date, total_wd, portfolio_vals, user_start_date)
 
     # === Meme time ===
     display_memes(probability)
