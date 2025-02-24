@@ -314,7 +314,7 @@ def main():
     deposit_growth_rate = st.sidebar.slider(
         "Monthly Deposit Growth Rate (%)",
         0.0, annual_inflation_rate * 100, annual_inflation_rate * 100, 0.1
-    ) / 100.0
+    ) / 250.0
     annual_return_rate = st.sidebar.slider("Annual Return Rate (%)", 0.0, 20.0, 14.8, 0.2) / 100.0
     annual_withdrawal_rate = st.sidebar.slider("Annual Withdrawal Rate (%)", 0.0, 20.0, 4.0, 0.5) / 100.0
 
