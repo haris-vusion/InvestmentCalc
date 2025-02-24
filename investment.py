@@ -614,6 +614,22 @@ def main():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=40, r=40, t=60, b=40)
     )
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=1.02, y=0.5,  # Position it to the right of the plot, vertically centered
+        text=(
+            "<b>Milestones</b><br>"
+            "£10k, £100k, £250k, £500k,<br>"
+            "£1m, £10m, £50m, £100m,<br>"
+            "£250m, £500m,<br> Billionaire!"
+        ),
+        showarrow=False,
+        font=dict(color="green", size=12),
+        bordercolor="green",
+        borderwidth=2,
+        bgcolor="white",
+        opacity=0.8
+    )
 
     st.plotly_chart(fig, use_container_width=True)
 
