@@ -542,7 +542,7 @@ def main():
             x=avg_dates,
             y=avg_portfolio,
             mode='lines',
-            line=dict(color='#17becf', width=3, dash='dot'),
+            line=dict(color='#17becf', width=3),
             name='Average Portfolio (£)',
             customdata=avg_customdata,
             hovertemplate=(
@@ -562,7 +562,7 @@ def main():
             x=avg_dates,
             y=avg_withdrawals,
             mode='lines',
-            line=dict(color='yellow', width=2,),
+            line=dict(color='yellow', width=2,dash='dot'),
             name='Average Monthly Withdrawal (£)'
         )
     )
