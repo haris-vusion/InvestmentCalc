@@ -287,7 +287,7 @@ def display_memes(probability):
         meme_folder = good_memes_folder
         st.markdown("### Congratulations! It's a Good Outcome Meme Break")
     else:
-        meme_folder = badMemes_folder
+        meme_folder = bad_memes_folder
         st.markdown("### Ouch... It's a Bad Outcome Meme Break")
 
     try:
