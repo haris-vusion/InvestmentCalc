@@ -426,11 +426,11 @@ def main():
     )
 
     # === Convert user params from % => decimal where needed ===
-    user_annual_inflation_rate   /= 100.0
-    user_deposit_growth_rate     /= 100.0
-    user_annual_return_rate      /= 100.0
-    user_annual_withdrawal_rate  /= 100.0
-    user_annual_volatility       /= 100.0
+    user_annual_inflation_rate   /= 100.0  # e.g., 4.8 => 0.048
+    user_deposit_growth_rate     /= 100.0  # e.g., 0.1 => 0.001
+    user_annual_return_rate      /= 100.0  # e.g., 14.8 => 0.148
+    user_annual_withdrawal_rate  /= 100.0  # e.g., 4.0 => 0.04
+    user_annual_volatility       /= 100.0  # e.g., 15.0 => 0.15
 
     # Quick function to check float equality
     def floats_match(a, b):
@@ -472,7 +472,6 @@ def main():
         int(user_num_simulations)
     )
 
-    # Color the success probability metric
     color = "#2ecc71" if probability >= 50 else "#e74c3c"
     st.markdown(
         f"<div class='subtle-box'><div class='small-metric' style='color:{color}'>"
@@ -482,6 +481,7 @@ def main():
     )
 
     # === AVERAGE SIMULATION ONLY ===
+    # This returns monthly data for the average run
     avg_dates, avg_portfolio, avg_withdrawals = simulate_average_simulation(
         user_initial_deposit,
         user_monthly_deposit,
@@ -496,41 +496,102 @@ def main():
         int(user_num_simulations)
     )
 
-    # Build figure
+    # --- CREATE FIGURE ---
     fig = go.Figure()
 
-    # Plot the average portfolio
+    # 1) Convert monthly average data -> Yearly data
+    #    We'll sample at end of each year for the portfolio,
+    #    and sum the monthly withdrawals for that year to get a "yearly actual withdrawal."
+    total_months = len(avg_dates)  # should be user_years * 12
+    year_end_dates = []
+    year_end_portfolio = []
+    yearly_actual_withdrawals = []  # sum of that year's monthly average withdrawals
+
+    for year_idx in range(user_years):
+        # End-of-year month index
+        end_month_idx = (year_idx + 1) * 12 - 1
+        if end_month_idx >= total_months:
+            break
+
+        # Portfolio at year end
+        p = avg_portfolio[end_month_idx]
+        year_end_portfolio.append(p)
+
+        # Date at year end
+        year_end_dates.append(avg_dates[end_month_idx])
+
+        # Sum the monthly average withdrawals for that entire year
+        start_of_year_idx = year_idx * 12
+        # e.g., if year_idx=0 => months 0..11
+        #       if year_idx=1 => months 12..23
+        # and so on
+        # Make sure we don't go out of range:
+        end_of_year_idx = min((year_idx + 1) * 12, total_months)
+        yearly_withdraw_sum = sum(avg_withdrawals[start_of_year_idx:end_of_year_idx])
+        yearly_actual_withdrawals.append(yearly_withdraw_sum)
+
+    # 2) Also compute a "Potential Yearly Withdrawal" line
+    #    i.e., a 4% rule style figure at year end: portfolio * annual_withdrawal_rate
+    #    plus an inflation-adjusted version
+    #    So each point's customdata = [nominal_yearly, adjusted_yearly]
+    year_customdata = []
+    for i, p in enumerate(year_end_portfolio):
+        # Nominal 4% rule style
+        nominal = p * user_annual_withdrawal_rate
+
+        # Adjust for partial inflation: (1 + inflation)^year
+        # i is the 0-based index, but the actual "year" is i+1
+        factor = (1 + user_annual_inflation_rate) ** (i + 1)
+        adjusted = nominal / factor
+
+        year_customdata.append([nominal, adjusted])
+
+    # 3) Add a trace for "Year-End Portfolio + Potential Yearly Withdrawal"
     fig.add_trace(
         go.Scatter(
-            x=avg_dates,
-            y=avg_portfolio,
-            mode='lines',
+            x=year_end_dates,
+            y=year_end_portfolio,
+            mode='markers+lines',
             line=dict(color='#17becf', width=3),
-            name='Average Portfolio (£)'
+            marker=dict(size=8),
+            name='Yearly Portfolio (Potential Withdrawal)',
+            customdata=year_customdata,
+            hovertemplate=(
+                "Year End: %{x|%Y-%m-%d}<br>"
+                "Portfolio: £%{y:,.2f}<br>"
+                "Potential Yearly Withdrawal: £%{customdata[0]:,.2f} "
+                "(adj. £%{customdata[1]:,.2f})<br>"
+                "<extra></extra>"
+            )
         )
     )
 
-    # Plot the average withdrawals
+    # 4) Add a trace for "Yearly Actual Withdrawals" from the average scenario
     fig.add_trace(
         go.Scatter(
-            x=avg_dates,
-            y=avg_withdrawals,
-            mode='lines',
+            x=year_end_dates,
+            y=yearly_actual_withdrawals,
+            mode='markers+lines',
             line=dict(color='yellow', width=2, dash='dot'),
-            name='Average Withdrawal (£)'
+            marker=dict(size=8),
+            name='Yearly Actual Withdrawal (Avg)',
+            hovertemplate=(
+                "Year End: %{x|%Y-%m-%d}<br>"
+                "Actual Withdrawal This Year: £%{y:,.2f}<br>"
+                "<extra></extra>"
+            )
         )
     )
 
-    # === DETECT "WITHDRAWAL START" IN AVERAGE SCENARIO ===
-    # We find the first month where avg_withdrawals > 0
-    first_withdraw_idx = next((i for i, w in enumerate(avg_withdrawals) if w > 1e-9), None)
-    if first_withdraw_idx is not None:
-        # We'll add a vertical line + annotation at that point
-        x_value = avg_dates[first_withdraw_idx]
+    # 5) We also want to place a vertical line when the AVERAGE scenario first starts withdrawing
+    #    i.e., the first year that had > 0 actual withdrawals
+    first_withdraw_year_idx = next((i for i, w in enumerate(yearly_actual_withdrawals) if w > 1e-9), None)
+    if first_withdraw_year_idx is not None:
+        x_value = year_end_dates[first_withdraw_year_idx]
         fig.add_vline(x=x_value, line_width=2, line_dash="dash", line_color="green")
         fig.add_annotation(
             x=x_value,
-            y=avg_portfolio[first_withdraw_idx],
+            y=year_end_portfolio[first_withdraw_year_idx],
             text="Withdrawal Start (Avg)",
             showarrow=True,
             arrowhead=2,
@@ -540,25 +601,14 @@ def main():
             arrowcolor="green"
         )
 
-    # Format the y-axis
-    fig.update_yaxes(tickformat=",.2f")
-    fig.update_layout(
-        title="Portfolio Growth & Withdrawals Over Time (Average Only)",
-        xaxis_title="Date",
-        yaxis_title="£",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=40, r=40, t=60, b=40)
-    )
-
-    # Add milestone markers on the average portfolio line
-    milestones = [10000, 100000, 250000, 500000, 1000000, 10000000, 50000000, 100000000, 250000000, 500000000]
+    # 6) Milestone markers on the average monthly portfolio
+    #    (We keep monthly for a smoother milestone detection.)
     milestone_x = []
     milestone_y = []
     milestone_text = []
-
+    milestones = [10000, 100000, 250000, 500000, 1000000, 10000000, 50000000, 100000000, 250000000, 500000000]
     for milestone in milestones:
-        idx = next((i for i, p in enumerate(avg_portfolio) if p >= milestone), None)
+        idx = next((m for m, val in enumerate(avg_portfolio) if val >= milestone), None)
         if idx is not None:
             milestone_x.append(avg_dates[idx])
             milestone_y.append(avg_portfolio[idx])
@@ -583,9 +633,23 @@ def main():
         )
     )
 
+    # 7) Final figure layout
+    fig.update_yaxes(tickformat=",.2f")
+    fig.update_layout(
+        title="Portfolio Growth & Withdrawals Over Time (Average Only, Yearly)",
+        xaxis_title="Date",
+        yaxis_title="£",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=40, r=40, t=60, b=40)
+    )
+
     st.plotly_chart(fig, use_container_width=True)
 
     # === SUMMARY (for average scenario) ===
+    # This still uses monthly data for the summary, which is fine.
+    # If you prefer a purely yearly approach, you could adapt display_summary_for_average
+    # to use the year-end data. For now, let's keep it:
     display_summary_for_average(
         avg_dates,
         avg_portfolio,
