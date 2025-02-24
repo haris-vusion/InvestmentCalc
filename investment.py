@@ -13,9 +13,8 @@ BASE_PERSONAL_ALLOWANCE = 12570
 BASE_BASIC_RATE_LIMIT = 50270
 BASE_HIGHER_RATE_LIMIT = 125140
 
-
 def calc_tax_annual(gross, pa, brt, hrt):
-    """Simple tiered UK tax calculation given inflated personal allowances and thresholds."""
+    """Simple tiered UK tax calculation for a single year's withdrawal."""
     if gross <= 0:
         return 0.0
     if gross <= pa:
@@ -30,13 +29,15 @@ def calc_tax_annual(gross, pa, brt, hrt):
     tax += additional_portion * 0.45
     return tax
 
-
 def calc_net_annual(gross, pa, brt, hrt):
+    """Net after tax for a single year's withdrawal."""
     return gross - calc_tax_annual(gross, pa, brt, hrt)
 
-
 def required_gross_annual_for_net_annual(net_annual, pa, brt, hrt):
-    """Binary search to find how much gross is needed to net a certain amount."""
+    """
+    How much gross do we need so that net is 'net_annual'?
+    Binary search, to handle tax tiers.
+    """
     if net_annual <= 0:
         return 0.0
     low, high = 0.0, 2_000_000.0
@@ -49,162 +50,143 @@ def required_gross_annual_for_net_annual(net_annual, pa, brt, hrt):
             high = mid
     return high
 
-
 def get_tax_brackets_for_factor(factor):
-    """Inflate all bracket cutoffs by some factor."""
+    """Inflate bracket cutoffs by 'factor' for the year."""
     pa = BASE_PERSONAL_ALLOWANCE * factor
     brt = BASE_BASIC_RATE_LIMIT * factor
     hrt = BASE_HIGHER_RATE_LIMIT * factor
     return pa, brt, hrt
 
-
-################################
-# 1A) HELPER TO CHECK RETIREMENT
-################################
-def can_retire_now(portfolio_value, annual_withdrawal_rate, current_annual_cost, pa, brt, hrt):
-    """
-    Return True if the net withdrawal (after tax) from portfolio_value * annual_withdrawal_rate
-    is enough to cover current_annual_cost.
-    """
-    gross_withdrawal = annual_withdrawal_rate * portfolio_value
-    tax_on_withdrawal = calc_tax_annual(gross_withdrawal, pa, brt, hrt)
-    net_withdrawal = gross_withdrawal - tax_on_withdrawal
-    return net_withdrawal >= current_annual_cost
-
-
 ############################
-# 2) SIMULATION LOGIC
+# 2) ANNUAL SIMULATION LOGIC
 ############################
-def simulate_investment(
-        initial_deposit,
-        monthly_deposit,
-        deposit_growth_rate,  # e.g. 0.005 => 0.5% growth each month
-        annual_return_rate,   # e.g. 0.07 => 7% annual
-        annual_inflation_rate,  # e.g. 0.02 => 2% annual
-        annual_withdrawal_rate, # e.g. 0.04 => 4% annual
-        target_annual_living_cost,  # e.g. 30000
-        years,
-        annual_volatility,    # e.g. 0.15 => 15% stdev
-        start_date,
+def simulate_investment_annual(
+    initial_deposit,
+    annual_deposit,
+    deposit_growth_rate,    # e.g. 0.05 => +5% deposit each year
+    annual_return_rate,     # e.g. 0.07 => 7% annual
+    annual_inflation_rate,  # e.g. 0.02 => 2% annual
+    annual_withdrawal_rate, # e.g. 0.04 => 4% rule
+    target_annual_living_cost,  # e.g. 30000 net
+    years,
+    annual_volatility,      # e.g. 0.15 => 15% stdev
+    start_date,
+    mode="strict"           # or "four_percent"
 ):
     """
-    Monthly simulation:
-      • We deposit every month until we retire.
-      • 'Retire' (flip to withdraw mode) as soon as net withdrawal at the chosen withdrawal rate
-        can cover your desired annual net cost (including inflation).
-      • Once withdrawing, no more deposits, but we withdraw monthly = (annual withdrawal) / 12,
-        inflated each month, subject to partial if portfolio is too small.
-      • Returns are random draws from a normal distribution with mean = monthly_mean_return, std = monthly_std.
-      • Inflation is applied monthly to your target living cost (and to the tax bracket cutoffs).
+    We simulate year by year:
+      1) Add an annual deposit (if not retired) -> grows by deposit_growth_rate each year
+      2) Apply random annual return (draw from normal with mean=annual_return_rate, stdev=annual_volatility)
+      3) Check if we can retire:
+         - Condition: net(annual_withdrawal_rate * portfolio) >= current_annual_cost
+      4) If retired, we withdraw once per year:
+         - If mode == "strict": withdraw exactly the gross needed to net your cost (inflation adjusted).
+         - If mode == "four_percent": withdraw (annual_withdrawal_rate * portfolio) gross, pay tax, keep the net.
+           (If the portfolio isn't big enough, do partial.)
+      5) Inflates living cost each year.
+      6) Also inflates tax brackets each year (optional).
     """
-    total_months = years * 12
-
-    # Convert to monthly
-    monthly_return_mean = (1 + annual_return_rate) ** (1 / 12) - 1
-    monthly_std = annual_volatility / (12 ** 0.5)
-    monthly_inflation = (1 + annual_inflation_rate) ** (1 / 12) - 1
-
-    # Current scenario
+    random_gen = random.Random()  # keep a local random generator if needed
     portfolio_value = float(initial_deposit)
+    current_annual_deposit = float(annual_deposit)
+    current_annual_cost = float(target_annual_living_cost)
+    tax_factor = 1.0  # to inflate tax brackets
+
     withdrawing = False
     start_withdrawal_date = None
     total_withdrawn = 0.0
 
-    # time-series tracking
+    # track timeseries
+    year_list = []
     dates_list = []
     portfolio_values = []
     withdrawal_values = []
 
-    # NEW: Track potential monthly net withdrawal if we retired *this* month
-    potential_monthly_net_withdrawals = []
+    for yr in range(years):
+        current_year_date = start_date + relativedelta(years=yr)
 
-    current_monthly_deposit = float(monthly_deposit)
-    current_annual_cost = float(target_annual_living_cost)
-
-    # Because we do monthly inflation, keep track of a "tax bracket inflation factor" each month
-    tax_factor = 1.0
-
-    for m in range(total_months):
-        current_date = start_date + relativedelta(months=m)
-
-        # 1) deposit (if not retired)
+        # 1) deposit if not retired
         if not withdrawing:
-            portfolio_value += current_monthly_deposit
-            # deposit grows for next month
-            current_monthly_deposit *= (1 + deposit_growth_rate)
+            portfolio_value += current_annual_deposit
+            # deposit grows for next year
+            current_annual_deposit *= (1 + deposit_growth_rate)
 
-        # 2) apply monthly random return
-        monthly_return = random.gauss(monthly_return_mean, monthly_std)
-        portfolio_value *= (1 + monthly_return)
+        # 2) apply random annual return
+        #    We'll treat annual_return_rate as an average (like 0.07 => +7%)
+        #    with stdev = annual_volatility. Then do one random draw for the year.
+        annual_return = random.gauss(annual_return_rate, annual_volatility)
+        portfolio_value *= (1 + annual_return)
 
-        # 3) check if we have 'enough' to retire, using net withdrawal logic
+        # 3) check if we can retire if not already
         pa, brt, hrt = get_tax_brackets_for_factor(tax_factor)
-        if (not withdrawing) and can_retire_now(portfolio_value, annual_withdrawal_rate, current_annual_cost, pa, brt, hrt):
-            withdrawing = True
-            start_withdrawal_date = current_date
+        net_if_4_percent = calc_net_annual(annual_withdrawal_rate * portfolio_value, pa, brt, hrt)
 
-        # 4) if withdrawing, withdraw monthly from the portfolio.
-        #    The "annual withdrawal" is the needed gross for your annual cost, i.e. enough to net current_annual_cost.
-        #    We'll compute that by reversing the tax function each month.
-        #    Alternatively, you can keep the existing approach to ensure you always withdraw exactly what's needed.
+        if (not withdrawing) and (net_if_4_percent >= current_annual_cost):
+            withdrawing = True
+            start_withdrawal_date = current_year_date
+
+        # 4) if retired, withdraw once per year
         if withdrawing:
-            needed_gross_annual = required_gross_annual_for_net_annual(current_annual_cost, pa, brt, hrt)
-            monthly_gross_needed = needed_gross_annual / 12.0
-            if portfolio_value >= monthly_gross_needed:
-                withdrawal_amt = monthly_gross_needed
-            else:
-                # partial withdrawal if not enough
-                withdrawal_amt = max(0, portfolio_value)
+            if mode == "strict":
+                # Only withdraw exactly enough to net your cost
+                needed_gross = required_gross_annual_for_net_annual(current_annual_cost, pa, brt, hrt)
+                if portfolio_value >= needed_gross:
+                    withdrawal_amt = needed_gross
+                else:
+                    # partial if portfolio too small
+                    withdrawal_amt = max(0, portfolio_value)
+            else:  # mode == "four_percent"
+                withdrawal_amt = annual_withdrawal_rate * portfolio_value
+                if portfolio_value < withdrawal_amt:
+                    withdrawal_amt = max(0, portfolio_value)
+
             portfolio_value -= withdrawal_amt
         else:
             withdrawal_amt = 0.0
 
         total_withdrawn += withdrawal_amt
 
-        # track for plotting
-        dates_list.append(current_date)
+        # track timeseries
+        year_list.append(yr)
+        dates_list.append(current_year_date)
         portfolio_values.append(portfolio_value)
         withdrawal_values.append(withdrawal_amt)
 
-        # 5) calculate potential net withdrawal *if* you retired now
-        #    (this is purely for visualization, doesn't affect actual logic)
-        gross_withdrawal_now = annual_withdrawal_rate * portfolio_value
-        tax_on_withdrawal_now = calc_tax_annual(gross_withdrawal_now, pa, brt, hrt)
-        net_annual_withdrawal_now = gross_withdrawal_now - tax_on_withdrawal_now
-        potential_monthly_net_withdrawal = net_annual_withdrawal_now / 12.0
-        potential_monthly_net_withdrawals.append(potential_monthly_net_withdrawal)
+        # 5) inflate cost for next year
+        current_annual_cost *= (1 + annual_inflation_rate)
 
-        # 6) inflation increments for next month
-        current_annual_cost *= (1 + monthly_inflation)
-        tax_factor *= (1 + monthly_inflation)
+        # 6) inflate tax brackets
+        tax_factor *= (1 + annual_inflation_rate)
 
-    return dates_list, portfolio_values, withdrawal_values, start_withdrawal_date, total_withdrawn, potential_monthly_net_withdrawals
+    return (dates_list, portfolio_values, withdrawal_values,
+            start_withdrawal_date, total_withdrawn)
 
-
-def simulate_average_simulation(
-        initial_deposit,
-        monthly_deposit,
-        deposit_growth_rate,
-        annual_return_rate,
-        annual_inflation_rate,
-        annual_withdrawal_rate,
-        target_annual_living_cost,
-        years,
-        annual_volatility,
-        start_date,
-        num_simulations
+###############################
+# 3) AVERAGE SIM & MONTE CARLO
+###############################
+def simulate_average_simulation_annual(
+    initial_deposit,
+    annual_deposit,
+    deposit_growth_rate,
+    annual_return_rate,
+    annual_inflation_rate,
+    annual_withdrawal_rate,
+    target_annual_living_cost,
+    years,
+    annual_volatility,
+    start_date,
+    num_simulations,
+    mode
 ):
-    """Average out multiple runs of the above simulation."""
-    total_months = years * 12
-    aggregated_portfolio = [0.0] * total_months
-    aggregated_withdrawal = [0.0] * total_months
-    aggregated_potential_net_wd = [0.0] * total_months
+    """Average out multiple runs of the above annual simulation."""
+    aggregated_portfolio = [0.0] * years
+    aggregated_withdrawals = [0.0] * years
     dates = None
 
     for _ in range(num_simulations):
-        d, pv, wv, _, _, pmwd = simulate_investment(
+        d, pv, wv, _, _ = simulate_investment_annual(
             initial_deposit,
-            monthly_deposit,
+            annual_deposit,
             deposit_growth_rate,
             annual_return_rate,
             annual_inflation_rate,
@@ -212,33 +194,32 @@ def simulate_average_simulation(
             target_annual_living_cost,
             years,
             annual_volatility,
-            start_date
+            start_date,
+            mode
         )
         if dates is None:
             dates = d
-        for i in range(total_months):
+        for i in range(years):
             aggregated_portfolio[i] += pv[i]
-            aggregated_withdrawal[i] += wv[i]
-            aggregated_potential_net_wd[i] += pmwd[i]
+            aggregated_withdrawals[i] += wv[i]
 
     avg_portfolio = [p / num_simulations for p in aggregated_portfolio]
-    avg_withdrawal = [w / num_simulations for w in aggregated_withdrawal]
-    avg_potential_wd = [x / num_simulations for x in aggregated_potential_net_wd]
-    return dates, avg_portfolio, avg_withdrawal, avg_potential_wd
+    avg_withdrawals = [w / num_simulations for w in aggregated_withdrawals]
+    return dates, avg_portfolio, avg_withdrawals
 
-
-def run_monte_carlo(
-        initial_deposit,
-        monthly_deposit,
-        deposit_growth_rate,
-        annual_return_rate,
-        annual_inflation_rate,
-        annual_withdrawal_rate,
-        target_annual_living_cost,
-        years,
-        annual_volatility,
-        start_date,
-        num_simulations
+def run_monte_carlo_annual(
+    initial_deposit,
+    annual_deposit,
+    deposit_growth_rate,
+    annual_return_rate,
+    annual_inflation_rate,
+    annual_withdrawal_rate,
+    target_annual_living_cost,
+    years,
+    annual_volatility,
+    start_date,
+    num_simulations,
+    mode
 ):
     """
     We'll say a run is 'successful' if:
@@ -247,9 +228,9 @@ def run_monte_carlo(
     """
     successes = 0
     for _ in range(num_simulations):
-        _, pv, _, wd_date, _, _ = simulate_investment(
+        _, pv, _, wd_date, _ = simulate_investment_annual(
             initial_deposit,
-            monthly_deposit,
+            annual_deposit,
             deposit_growth_rate,
             annual_return_rate,
             annual_inflation_rate,
@@ -257,14 +238,17 @@ def run_monte_carlo(
             target_annual_living_cost,
             years,
             annual_volatility,
-            start_date
+            start_date,
+            mode
         )
         if wd_date is not None and pv[-1] > 0:
             successes += 1
     return (successes / num_simulations) * 100
 
-
-def display_summary_for_average(dates, portfolio, withdrawals, start_date):
+##############################
+# 4) STREAMLIT DISPLAY FUNCS
+##############################
+def display_summary_for_average_annual(dates, portfolio, withdrawals):
     import streamlit as st
     first_withdraw_idx = None
     for i, w in enumerate(withdrawals):
@@ -283,19 +267,17 @@ def display_summary_for_average(dates, portfolio, withdrawals, start_date):
         st.write("• Total average withdrawn: £0.00")
     else:
         start_wd_date = dates[first_withdraw_idx]
-        yrs_into_sim = (start_wd_date - start_date).days / 365.25
-        st.write(f"• Retire withdrawals began on {start_wd_date.strftime('%Y-%m-%d')} (~{yrs_into_sim:.2f} years in).")
+        years_into_sim = (start_wd_date - dates[0]).days / 365.25
+        st.write(f"• Retire withdrawals began on {start_wd_date.strftime('%Y-%m-%d')} (~{years_into_sim:.2f} years in).")
         st.write(f"• Final average portfolio value: £{final_portfolio:,.2f}")
         st.write(f"• Total average withdrawn: £{total_withdrawn:,.2f}")
 
-
 def display_memes(probability):
-    """
-    Example usage showing a random 'good meme' vs 'bad meme'.
-    Adjust folder paths or remove entirely if you just want a silly placeholder.
-    """
+    """Simple meme logic. Adjust or remove as needed."""
     good_memes_folder = "goodMemes"
     bad_memes_folder = "badMemes"
+
+    import streamlit as st
 
     if probability >= 50:
         st.markdown("### Congratulations! It's a Good Outcome Meme Break")
@@ -318,37 +300,36 @@ def display_memes(probability):
         st.write(f"Could not load memes from folder '{meme_folder}'")
         st.write(e)
 
-
 ##############################
-# 5) MAIN APP
+# 5) MAIN APP (ANNUAL LOGIC)
 ##############################
 def main():
-    st.set_page_config(page_title="Haris' Lods of Emone", layout="wide")
+    st.set_page_config(page_title="Haris' Lods of Emone (Annual)", layout="wide")
 
-    st.title("Haris' Lods of Emone Simulator")
+    st.title("Haris' Lods of Emone (Annual Simulation)")
     st.write(
-        "A quick simulation that invests monthly and flips to withdrawals "
-        "as soon as the portfolio can sustain your target annual net cost "
-        "at your chosen withdrawal rate."
+        "This version simulates year by year, adding deposits (if not retired), "
+        "applying annual returns, and then checking if you can retire. "
+        "Once retired, you withdraw once per year according to the selected mode."
     )
 
-    # Default parameter dictionary (in PERCENT for rates)
+    # Default parameter dictionary (all in ANNUAL terms, with percentages)
     default_params = {
         "start_date": datetime.today().date(),
-        "initial_deposit": 5000,
-        "monthly_deposit": 100,
-        "annual_inflation_rate": 4.8,  # 4.8% annual
-        "deposit_growth_rate": 0.5,  # 0.5% monthly deposit growth
-        "annual_return_rate": 14.8,  # 14.8% annual
-        "annual_withdrawal_rate": 4.0,  # 4% annual
+        "initial_deposit": 10000,
+        "annual_deposit": 6000,  # e.g. 500 per month x 12
+        "annual_inflation_rate": 3.0,   # 3% annual
+        "deposit_growth_rate": 2.0,     # 2% annual deposit growth
+        "annual_return_rate": 7.0,      # 7% annual
+        "annual_withdrawal_rate": 4.0,  # 4% rule
         "target_annual_living_cost": 30000,
-        "years": 100,
-        "annual_volatility": 15.0,  # 15% stdev
+        "years": 40,
+        "annual_volatility": 10.0,      # 10% stdev
         "num_simulations": 50
     }
 
     # === SIDEBAR ===
-    st.sidebar.header("Simulation Parameters")
+    st.sidebar.header("Simulation Parameters (Annual)")
     user_start_date = st.sidebar.date_input(
         "Starting Date",
         value=default_params["start_date"]
@@ -359,20 +340,20 @@ def main():
         value=default_params["initial_deposit"],
         step=1000
     )
-    user_monthly_deposit = st.sidebar.number_input(
-        "Monthly Deposit (£)",
+    user_annual_deposit = st.sidebar.number_input(
+        "Annual Deposit (£)",
         min_value=0,
-        value=default_params["monthly_deposit"],
-        step=50
+        value=default_params["annual_deposit"],
+        step=1000
     )
     user_annual_inflation_rate = st.sidebar.slider(
         "Annual Inflation Rate (%)",
-        0.0, 7.0,
+        0.0, 10.0,
         default_params["annual_inflation_rate"], 0.1
     )
     user_deposit_growth_rate = st.sidebar.slider(
-        "Monthly Deposit Growth Rate (%)",
-        0.0, 2.0,
+        "Annual Deposit Growth Rate (%)",
+        0.0, 10.0,
         default_params["deposit_growth_rate"], 0.1
     )
     user_annual_return_rate = st.sidebar.slider(
@@ -393,12 +374,12 @@ def main():
     )
     user_years = st.sidebar.slider(
         "Number of Years to Simulate",
-        1, 100,
+        1, 60,
         default_params["years"]
     )
     user_annual_volatility = st.sidebar.slider(
         "Annual Volatility (%)",
-        0.0, 30.0,
+        0.0, 50.0,
         default_params["annual_volatility"], 0.1
     )
     user_num_sims = st.sidebar.number_input(
@@ -406,6 +387,14 @@ def main():
         min_value=10,
         value=default_params["num_simulations"],
         step=10
+    )
+
+    # Choose the mode:
+    user_mode = st.sidebar.selectbox(
+        "Withdrawal Mode",
+        ("strict", "four_percent"),
+        index=0,
+        help="strict = only withdraw exactly enough to net your living cost; four_percent = always withdraw 4% (or chosen rate) once retired"
     )
 
     # Convert percentages => decimals
@@ -416,9 +405,9 @@ def main():
     user_annual_volatility /= 100.0
 
     # === RUN MONTE CARLO
-    probability = run_monte_carlo(
+    probability = run_monte_carlo_annual(
         user_initial_deposit,
-        user_monthly_deposit,
+        user_annual_deposit,
         user_deposit_growth_rate,
         user_annual_return_rate,
         user_annual_inflation_rate,
@@ -427,7 +416,8 @@ def main():
         user_years,
         user_annual_volatility,
         user_start_date,
-        user_num_sims
+        user_num_sims,
+        user_mode
     )
 
     color = "#2ecc71" if probability >= 50 else "#e74c3c"
@@ -443,9 +433,9 @@ def main():
     )
 
     # === AVERAGE SIM
-    avg_dates, avg_portfolio, avg_withdrawals, avg_potential_wds = simulate_average_simulation(
+    avg_dates, avg_portfolio, avg_withdrawals = simulate_average_simulation_annual(
         user_initial_deposit,
-        user_monthly_deposit,
+        user_annual_deposit,
         user_deposit_growth_rate,
         user_annual_return_rate,
         user_annual_inflation_rate,
@@ -454,63 +444,43 @@ def main():
         user_years,
         user_annual_volatility,
         user_start_date,
-        user_num_sims
+        user_num_sims,
+        user_mode
     )
 
     # Build a yearly plot
     fig = go.Figure()
-    total_months = len(avg_dates)
-    # Group by year-ends
-    year_end_indices = range(11, total_months, 12)
-    year_end_x = []
-    year_end_port = []
-    year_end_wd = []
-    year_end_potential = []
+    year_indices = range(user_years)
+    # We'll just map each year to its date
+    x_vals = [avg_dates[i] for i in year_indices]
 
-    for idx in year_end_indices:
-        if idx >= total_months:
-            break
-        year_end_x.append(avg_dates[idx])
-        year_end_port.append(avg_portfolio[idx])
-        # sum monthly withdrawals for that year block
-        year_start = idx - 11
-        sum_wd = sum(avg_withdrawals[year_start:idx + 1])
-        year_end_wd.append(sum_wd)
-        year_end_potential.append(avg_potential_wds[idx])  # just pick the last monthly potential in that year
-
+    # Plot portfolio
     fig.add_trace(
         go.Scatter(
-            x=year_end_x,
-            y=year_end_port,
-            name="Year-End Portfolio (Avg)",
+            x=x_vals,
+            y=avg_portfolio,
+            name="Portfolio (Avg)",
             mode='lines+markers',
             line=dict(color='cyan', width=3)
         )
     )
+
+    # Plot withdrawal each year
     fig.add_trace(
         go.Scatter(
-            x=year_end_x,
-            y=year_end_wd,
+            x=x_vals,
+            y=avg_withdrawals,
             name="Yearly Withdrawal (Avg)",
             mode='lines+markers',
             line=dict(color='yellow', width=2, dash='dot')
         )
     )
-    fig.add_trace(
-        go.Scatter(
-            x=year_end_x,
-            y=year_end_potential,
-            name="Potential Net WD (Year-End)",
-            mode='lines+markers',
-            line=dict(color='magenta', width=2)
-        )
-    )
 
     # Mark the first year we see withdrawals
-    first_wd_idx = next((i for i, w in enumerate(year_end_wd) if w > 0), None)
+    first_wd_idx = next((i for i, w in enumerate(avg_withdrawals) if w > 1e-9), None)
     if first_wd_idx is not None:
-        x_val = year_end_x[first_wd_idx]
-        y_val = year_end_port[first_wd_idx]
+        x_val = x_vals[first_wd_idx]
+        y_val = avg_portfolio[first_wd_idx]
         fig.add_vline(x=x_val, line_width=2, line_dash="dash", line_color="green")
         fig.add_annotation(
             x=x_val,
@@ -525,8 +495,8 @@ def main():
         )
 
     fig.update_layout(
-        title="Portfolio Growth & Withdrawals (Yearly, Average of Simulations)",
-        xaxis_title="Date",
+        title=f"Annual Portfolio & Withdrawals (Mode: {user_mode})",
+        xaxis_title="Year Index (Date Shown)",
         yaxis_title="£",
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -536,7 +506,7 @@ def main():
     st.plotly_chart(fig, use_container_width=True)
 
     # Show textual summary
-    display_summary_for_average(avg_dates, avg_portfolio, avg_withdrawals, user_start_date)
+    display_summary_for_average_annual(avg_dates, avg_portfolio, avg_withdrawals)
 
     # Simple inflation check
     infl_factor = (1 + user_annual_inflation_rate) ** user_years
@@ -547,7 +517,6 @@ def main():
 
     # Meme break
     display_memes(probability)
-
 
 if __name__ == "__main__":
     main()
